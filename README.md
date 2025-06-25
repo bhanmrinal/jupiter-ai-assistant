@@ -19,6 +19,23 @@ User Query → Embedding → Vector Search → Context Retrieval → LLM Generat
            Long-term Memory Storage ← Feedback Collection
 ```
 
+```mermaid
+flowchart TD
+    A["Data Ingestion: Web Scraping Jupiter Sources"] --> B["Processing Pipeline: LLM Cleaning, Deduplication, Categorization"]
+    B --> C["Storage Layer: MongoDB, ChromaDB"]
+    C --> D["AI Model Layer: Qwen2.5-728, DeepSeek-R1, Multilingual Embedding, Hindi/Hinglish"]
+    D --> E["RAG System: Retrieval-Augmented Generation"]
+    E --> F["API Layer: Chat, Search, Feedback Handler"]
+    F --> G["UI: Streamlit Chat Interface"]
+
+    G -->|User Queries| F
+    F -->|Responses| G
+    G -->|Feedback| F
+    A -->|Raw Data| B
+    B -->|Cleaned Data| C
+```
+
+
 ## 📁 Project Structure
 
 ```
