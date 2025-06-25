@@ -37,9 +37,10 @@ class GenerationResult:
 class ResponseGenerator:
     """Generates RAG-powered responses for Jupiter FAQ queries"""
 
-    def __init__(self):
-        self.llm_manager = LLMManager()
-        self.retriever = Retriever()
+    def __init__(self, llm_manager=None, retriever=None):
+        # Use provided instances or create new ones
+        self.llm_manager = llm_manager if llm_manager is not None else LLMManager()
+        self.retriever = retriever if retriever is not None else Retriever()
         self.confidence_threshold = settings.model.confidence_threshold
 
         log.info("ResponseGenerator initialized")
@@ -68,23 +69,21 @@ class ResponseGenerator:
                 query=query, language=language, category_filter=category_hint
             )
 
-            # Step 2: Determine language and model
+            # Step 2: Determine language  
             detected_language = (
                 retrieval_result.language if retrieval_result.language else LanguageEnum.ENGLISH
             )
-            selected_model = self.llm_manager.select_model(query, detected_language)
 
             # Step 3: Generate response with context
             if retrieval_result.total_found > 0:
                 response, confidence = self._generate_with_context(
                     query=query,
                     retrieval_result=retrieval_result,
-                    model_type=selected_model,
                     language=detected_language,
                 )
             else:
                 response, confidence = self._generate_without_context(
-                    query=query, model_type=selected_model, language=detected_language
+                    query=query, language=detected_language
                 )
 
             # Step 4: Post-process response
@@ -106,7 +105,7 @@ class ResponseGenerator:
                 confidence_score=confidence,
                 sources_used=sources_used,
                 retrieved_docs_count=retrieval_result.total_found,
-                model_used=selected_model.value,
+                model_used="TinyLlama-1.1B",
                 generation_time_ms=generation_time_ms,
                 retrieval_time_ms=retrieval_result.retrieval_time_ms,
                 language=detected_language,
@@ -124,7 +123,6 @@ class ResponseGenerator:
         self,
         query: str,
         retrieval_result: RetrievalResult,
-        model_type: ModelType,
         language: LanguageEnum,
     ) -> tuple[str, float]:
         """Generate response using retrieved context"""
@@ -143,15 +141,19 @@ class ResponseGenerator:
             retrieval_confidence=f"{len(retrieval_result.documents)}/{retrieval_result.total_found} matches",
         )
 
-        # Generate response
+        # Generate response with context for hybrid model
         response, base_confidence = self.llm_manager.generate_response(
-            prompt=prompt, model_type=model_type, max_length=300, temperature=0.7
+            prompt=query,  # Use original query instead of full prompt
+            context=retrieval_result.context_text,  # Pass context for fast extraction
+            language=language, 
+            max_tokens=300, 
+            temperature=0.7
         )
 
         return response, base_confidence
 
     def _generate_without_context(
-        self, query: str, model_type: ModelType, language: LanguageEnum
+        self, query: str, language: LanguageEnum
     ) -> tuple[str, float]:
         """Generate response without retrieved context"""
 
@@ -160,7 +162,11 @@ class ResponseGenerator:
         )
 
         response, confidence = self.llm_manager.generate_response(
-            prompt=prompt, model_type=model_type, max_length=200, temperature=0.8
+            prompt=query,  # Use original query 
+            context=None,  # No context available
+            language=language, 
+            max_tokens=200, 
+            temperature=0.8
         )
 
         return response, confidence
@@ -191,11 +197,13 @@ class ResponseGenerator:
             context_summary=context_summary,
         )
 
-        # Generate follow-up using primary model with low temperature for consistency
+        # Generate follow-up using fast mode for quick suggestions
         followup_response, _ = self.llm_manager.generate_response(
             prompt=followup_prompt,
-            model_type=ModelType.PRIMARY,
-            max_length=50,  # Keep follow-ups short
+            context=context_summary,  # Use context summary for follow-up
+            language=LanguageEnum.ENGLISH,
+            force_mode=ModelType.TINYLLAMA,  # Use TinyLlama for follow-ups
+            max_tokens=50,  # Keep follow-ups short
             temperature=0.3,  # Low temperature for consistent suggestions
         )
 
