@@ -120,7 +120,6 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
 .venv
 env/
 venv/
@@ -187,6 +186,10 @@ tmp/
 temp/
 .tmp/
 .temp/
+*.bin
+*.sqlite3
+*.db
+*.sqlite
 
 # Jupyter notebooks checkpoints
 .ipynb_checkpoints/
