@@ -155,7 +155,9 @@ class ResponseGenerator:
     ) -> tuple[str, float]:
         """Generate response without retrieved context"""
 
-        prompt = PromptTemplates.get_no_context_template().format(query=query)
+        prompt = PromptTemplates.get_no_context_template().format(
+            query=query, detected_language=language.value
+        )
 
         response, confidence = self.llm_manager.generate_response(
             prompt=prompt, model_type=model_type, max_length=200, temperature=0.8
