@@ -171,7 +171,6 @@ logs/
 
 
 # Model files and caches
-models/
 *.pkl
 *.pickle
 *.joblib

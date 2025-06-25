@@ -1,1 +1,1 @@
-# Source package for Jupiter FAQ Bot 
+# Source package for Jupiter FAQ Bot

@@ -1,1 +1,1 @@
-# Database package for Jupiter FAQ Bot 
+# Database package for Jupiter FAQ Bot

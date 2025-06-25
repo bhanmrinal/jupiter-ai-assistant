@@ -1,1 +1,1 @@
-# Utils package for Jupiter FAQ Bot 
+# Utils package for Jupiter FAQ Bot

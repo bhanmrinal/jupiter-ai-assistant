@@ -1,6 +1,7 @@
 """
 Data models for Jupiter FAQ Bot
 """
+
 from datetime import datetime
 from enum import Enum
 
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class CategoryEnum(str, Enum):
     """FAQ categories for Jupiter services"""
+
     # Core Banking Categories
     ACCOUNTS = "accounts"
     PAYMENTS = "payments"
@@ -17,12 +19,12 @@ class CategoryEnum(str, Enum):
     INVESTMENTS = "investments"
     REWARDS = "rewards"
     TRACK = "track"
-    
+
     # Support Categories
     KYC = "kyc"
     TECHNICAL = "technical"
     HELP = "help"
-    
+
     # Community Categories
     GENERAL = "general"
     COMMUNITY = "community"
@@ -30,26 +32,32 @@ class CategoryEnum(str, Enum):
     FEATURES = "features"
     FEEDBACK = "feedback"
     BUG_REPORTS = "bug_reports"
-    
+
     # Product Specific
     POTS = "pots"
     UPI = "upi"
     DIGIQUIZ = "digiquiz"
 
+
 class LanguageEnum(str, Enum):
     """Supported languages"""
+
     ENGLISH = "en"
     HINDI = "hi"
     HINGLISH = "hinglish"
 
+
 class SourceTypeEnum(str, Enum):
     """Source types for content"""
+
     HELP_CENTER = "help_center"
     COMMUNITY = "community"
     BLOG = "blog"
 
+
 class FAQMetadata(BaseModel):
     """Metadata for FAQ documents"""
+
     source_url: str
     source_type: SourceTypeEnum
     confidence_score: float | None = None
@@ -59,8 +67,10 @@ class FAQMetadata(BaseModel):
     author: str | None = None
     tags: list[str] = Field(default_factory=list)
 
+
 class FAQDocument(BaseModel):
     """Main FAQ document model"""
+
     id: str | None = None
     question: str = Field(..., min_length=5, max_length=500)
     answer: str = Field(..., min_length=10, max_length=5000)
@@ -68,12 +78,14 @@ class FAQDocument(BaseModel):
     language: LanguageEnum = LanguageEnum.ENGLISH
     embeddings: list[float] | None = None
     metadata: FAQMetadata
-    
+
     class Config:
         use_enum_values = True
 
+
 class UserQuery(BaseModel):
     """User query model"""
+
     query_id: str | None = None
     user_id: str | None = None
     question: str = Field(..., min_length=1, max_length=500)
@@ -82,8 +94,10 @@ class UserQuery(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     session_id: str | None = None
 
+
 class QueryResponse(BaseModel):
     """Response to user query"""
+
     response_id: str | None = None
     query_id: str
     answer: str
@@ -94,8 +108,10 @@ class QueryResponse(BaseModel):
     retrieved_faqs: list[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=datetime.now)
 
+
 class UserFeedback(BaseModel):
     """User feedback on responses"""
+
     feedback_id: str | None = None
     response_id: str
     user_id: str | None = None
@@ -104,8 +120,10 @@ class UserFeedback(BaseModel):
     comments: str | None = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
+
 class ConversationMemory(BaseModel):
     """Long-term conversation memory"""
+
     memory_id: str | None = None
     user_id: str | None = None
     session_id: str | None = None
@@ -119,8 +137,10 @@ class ConversationMemory(BaseModel):
     accessed_count: int = Field(default=1)
     last_accessed: datetime = Field(default_factory=datetime.now)
 
+
 class ProcessingStatus(BaseModel):
     """Status tracking for data processing"""
+
     status_id: str | None = None
     operation_type: str  # "scraping", "preprocessing", "embedding", etc.
     status: str  # "pending", "running", "completed", "failed"
@@ -131,8 +151,10 @@ class ProcessingStatus(BaseModel):
     started_at: datetime = Field(default_factory=datetime.now)
     completed_at: datetime | None = None
 
+
 class ScrapedContent(BaseModel):
     """Raw scraped content before processing"""
+
     content_id: str | None = None
     url: str
     title: str | None = None
@@ -140,4 +162,4 @@ class ScrapedContent(BaseModel):
     raw_html: str | None = None
     source_type: SourceTypeEnum
     scraped_at: datetime = Field(default_factory=datetime.now)
-    processing_status: str = "pending"  # "pending", "processed", "failed" 
+    processing_status: str = "pending"  # "pending", "processed", "failed"

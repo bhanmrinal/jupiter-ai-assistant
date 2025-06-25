@@ -1,1 +1,1 @@
-# Scraper package for Jupiter FAQ Bot 
+# Scraper package for Jupiter FAQ Bot

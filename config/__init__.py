@@ -1,1 +1,1 @@
-# Config package for Jupiter FAQ Bot 
+# Config package for Jupiter FAQ Bot
