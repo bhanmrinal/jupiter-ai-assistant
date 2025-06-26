@@ -76,17 +76,14 @@ class JupiterFAQApp:
         
         if "conversation_history" not in st.session_state:
             st.session_state.conversation_history = []
-                    
+            
         if "system_initialized" not in st.session_state:
             st.session_state.system_initialized = False
-        
-        if "system_components" not in st.session_state:
-            st.session_state.system_components = None
-        
-        if "current_model" not in st.session_state:
-            st.session_state.current_model = "Auto (Recommended)"
             
-        # Enhanced session state variables
+        if "system_components" not in st.session_state:
+            st.session_state.system_components = {}
+        
+        # Initialize model preferences
         if "preferred_groq_model" not in st.session_state:
             st.session_state.preferred_groq_model = "auto"
             
@@ -102,6 +99,9 @@ class JupiterFAQApp:
             
         if "user_feedback" not in st.session_state:
             st.session_state.user_feedback = []
+        
+        if "suggestion_clicked" not in st.session_state:
+            st.session_state.suggestion_clicked = None
 
     def apply_custom_css(self):
         """Apply custom CSS for better UX"""
@@ -159,11 +159,23 @@ class JupiterFAQApp:
                 retriever = Retriever(chroma_client)
                 response_generator = ResponseGenerator(retriever, llm_manager)
                 
+                # Initialize Answer Evaluator for evaluation functionality
+                try:
+                    from src.models.evaluation import AnswerEvaluator
+                    answer_evaluator = AnswerEvaluator(chroma_client, llm_manager)
+                    evaluation_available = True
+                except Exception as e:
+                    st.warning(f"Evaluation system not available: {e}")
+                    answer_evaluator = None
+                    evaluation_available = False
+                
                 return {
                     'chroma_client': chroma_client,
                     'llm_manager': llm_manager,
                     'retriever': retriever,
-                    'response_generator': response_generator
+                    'response_generator': response_generator,
+                    'answer_evaluator': answer_evaluator,
+                    'evaluation_available': evaluation_available
                 }
         except Exception as e:
             st.error(f"Failed to initialize system: {e}")
@@ -176,85 +188,47 @@ class JupiterFAQApp:
             st.markdown("*AI-powered customer support*")
             st.divider()
             
-            # Enhanced Model Selection
+            # AI Models section  
             st.markdown("### 🤖 AI Models")
             
-            # Get system info for model selection
-            if st.session_state.system_initialized:
-                system = st.session_state.system_components
-                model_info = system['llm_manager'].get_model_info()
-                
-                # Groq model selection
-                groq_models = model_info.get('groq_models', {})
-                if groq_models:
-                    st.markdown("**Groq Models:**")
-                    groq_options = ["Auto (Smart Selection)"] + list(groq_models.keys())
+            # Try to get system info, but show basic options if not available
+            try:
+                if st.session_state.system_initialized and st.session_state.system_components:
+                    system = st.session_state.system_components
+                    model_info = system['llm_manager'].get_model_info()
                     
-                    selected_groq = st.selectbox(
-                        "Groq Model:",
-                        groq_options,
-                        index=0,
-                        help="Auto mode selects the best model for each query"
-                    )
-                    
-                    if selected_groq != "Auto (Smart Selection)":
-                        st.session_state.preferred_groq_model = selected_groq
+                    # Model selection
+                    groq_models = model_info.get('groq_models', {})
+                    if groq_models:
+                        model_names = ["Auto (Smart Selection)"] + [data['name'] for data in groq_models.values()]
+                        
+                        selected_model = st.selectbox(
+                            "Choose Model:", 
+                            model_names,
+                            index=0,
+                            help="Auto mode intelligently selects the best model for each query"
+                        )
+                        
+                        # Store preference 
+                        if selected_model == "Auto (Smart Selection)":
+                            st.session_state.preferred_groq_model = "auto"
+                        else:
+                            # Find the model ID for the selected name
+                            for model_id, model_data in groq_models.items():
+                                if model_data['name'] == selected_model:
+                                    st.session_state.preferred_groq_model = model_id
+                                    break
                     else:
+                        st.selectbox("Choose Model:", ["Auto (Smart Selection)"], index=0, disabled=True)
                         st.session_state.preferred_groq_model = "auto"
-                    
-                    # Display model details
-                    if selected_groq != "Auto (Smart Selection)":
-                        model_data = groq_models[selected_groq]
-                        st.caption(f"⚡ Speed: {model_data['speed']} | 📝 Context: {model_data['context']}")
-                        st.caption(f"🎯 Best for: {model_data['best_for']}")
                 else:
-                    st.warning("No Groq models available")
-                
-                # Fallback models info
-                hf_models = model_info.get('hf_models', {})
-                if hf_models:
-                    st.markdown("**Fallback Models:**")
-                    for model_key, model_data in hf_models.items():
-                        status = "🟢" if model_data['loaded'] else "🔴"
-                        st.caption(f"{status} {model_data['name']} ({model_data['speed']})")
-                
-                # Model status summary
-                total_groq = len(groq_models)
-                total_hf = len([m for m in hf_models.values() if m['loaded']])
-                st.info(f"📊 {total_groq} Groq + {total_hf} Local models available")
-                
-            else:
-                # Basic model selection when system not ready
-                model_options = [
-                    "Auto (Recommended)",
-                    "Fast Mode", 
-                    "Quality Mode"
-                ]
-                
-                selected_model = st.selectbox(
-                    "Choose Model:",
-                    model_options,
-                    index=0,
-                    help="Auto mode uses the best available model"
-                )
-                
-                if selected_model != st.session_state.current_model:
-                    st.session_state.current_model = selected_model
-                    st.rerun()
-            
-            # Response Settings
-            st.markdown("### ⚙️ Response Settings")
-            
-            # Max tokens slider
-            max_tokens = st.slider(
-                "Response Length:",
-                min_value=100,
-                max_value=1000,
-                value=500,
-                step=50,
-                help="Maximum tokens for response generation"
-            )
-            st.session_state.max_tokens = max_tokens
+                    # Show basic selection while system initializes
+                    st.selectbox("Choose Model:", ["Auto (Smart Selection)"], index=0, disabled=True)
+                    st.session_state.preferred_groq_model = "auto"
+            except Exception:
+                # Fallback if there's any error
+                st.selectbox("Choose Model:", ["Auto (Smart Selection)"], index=0, disabled=True)
+                st.session_state.preferred_groq_model = "auto"
             
             # Show guardrails info
             with st.expander("🛡️ Safety Guardrails", expanded=False):
@@ -266,73 +240,25 @@ class JupiterFAQApp:
                 - ✅ Fallback model redundancy
                 """)
             
-            # Quick Stats (only if system is running)
-            if st.session_state.system_initialized and st.session_state.conversation_history:
-                st.markdown("### 📊 Session Stats")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Queries", len(st.session_state.conversation_history))
-                with col2:
-                    avg_time = self.calculate_average_response_time()
-                    st.metric("Avg Time", f"{avg_time:.1f}s")
-                
-                # Show model usage stats
-                if st.session_state.conversation_history:
-                    models_used = [h.get('metadata', {}).get('model_used', 'unknown') 
-                                 for h in st.session_state.conversation_history]
-                    model_counts = {}
-                    for model in models_used:
-                        model_counts[model] = model_counts.get(model, 0) + 1
-                    
-                    if model_counts:
-                        st.markdown("**Model Usage:**")
-                        for model, count in model_counts.items():
-                            st.caption(f"{model}: {count} times")
-            
             # Enhanced System Status
             st.markdown("### 🔧 System Status")
-            if st.session_state.system_initialized:
-                system = st.session_state.system_components
-                model_info = system['llm_manager'].get_model_info()
-                
-                # Overall status
-                if model_info['status'] == 'ready':
+            try:
+                if st.session_state.system_initialized and st.session_state.system_components:
                     st.success("🟢 All systems operational")
-                else:
-                    st.error("🔴 System issues detected")
-                
-                # Detailed status in expander
-                with st.expander("📋 Detailed Status", expanded=False):
-                    # Groq models
-                    groq_models = model_info.get('groq_models', {})
-                    if groq_models:
-                        st.markdown("**Groq Models:**")
-                        for model_id, model_data in groq_models.items():
-                            st.text(f"✅ {model_data['name']}")
                     
-                    # HuggingFace models  
-                    hf_models = model_info.get('hf_models', {})
-                    if hf_models:
-                        st.markdown("**Local Models:**")
-                        for model_key, model_data in hf_models.items():
-                            status = "✅" if model_data['loaded'] else "❌"
-                            st.text(f"{status} {model_data['name']}")
-                    
-                    # API status
+                    # API Key status
                     if os.getenv("GROQ_API_KEY"):
                         st.text("✅ Groq API Key configured")
                     else:
                         st.text("⚠️ Groq API Key missing")
-                        
-                    st.text(f"🔧 Device: {model_info.get('device', 'unknown')}")
-                    
-            else:
-                st.warning("🟡 Initializing system...")
-                
+                else:
+                    st.info("🔄 System ready")
+            except Exception:
+                st.info("🔄 System ready")
+            
             # Enhanced Data Info
             st.markdown("### 📚 Knowledge Base")
             st.info("1,044 Jupiter Money documents loaded")
-            st.caption("✨ 5.6x larger than before!")
             
             # Clear chat button
             st.divider()
@@ -385,7 +311,7 @@ class JupiterFAQApp:
             st.error(f"System check failed: {e}")
 
     def render_main_chat(self):
-        """Render clean, simple chat interface"""
+        """Render main chat interface with input at top"""
         # Initialize system if needed
         if not st.session_state.system_initialized:
             with st.spinner("🚀 Initializing Jupiter FAQ Bot..."):
@@ -396,30 +322,107 @@ class JupiterFAQApp:
                 else:
                     st.error("❌ Failed to initialize system")
                     return
-
-        # Clean header
-        st.markdown("# 🪐 Jupiter AI Assistant")
-        st.markdown("*Your AI Help-Desk for Jupiter Money *")
         
-        # Simple chat input
-        with st.form("chat_form", clear_on_submit=True):
-            prompt = st.text_input(
-                "💬 Ask your question:",
-                placeholder="e.g., How to reset my PIN? What are Jupiter's investment options?",
-                help="Ask anything about Jupiter Money - banking, payments, investments, cards, UPI, and more!"
-            )
-            submitted = st.form_submit_button("Ask", type="primary", use_container_width=True)
+        st.markdown("# 🤖 Jupiter Money AI Assistant")
+        st.markdown("*Your AI Help-Desk for Jupiter Money*")
         
-        # Handle form submission
-        if submitted and prompt.strip():
-            self.handle_user_input(prompt.strip())
-        
-        # Chat history - simple display
-        if st.session_state.messages:
-            st.markdown("---")
-            self.display_simple_chat_history()
+        # Check if a suggestion was clicked
+        suggestion_text = st.session_state.get('suggestion_clicked', '')
+        if suggestion_text:
+            # Clear the suggestion after displaying
+            st.session_state.suggestion_clicked = None
+            
+            # Show the suggestion in a text input for the user to edit/send
+            with st.form("suggestion_form", clear_on_submit=True):
+                edited_prompt = st.text_area(
+                    "✨ Suggestion selected - Edit if needed and click Send:",
+                    value=suggestion_text,
+                    height=100,
+                    help="You can edit this suggestion or send it as is"
+                )
+                
+                col1, col2 = st.columns([1, 4])
+                with col1:
+                    if st.form_submit_button("📤 Send", type="primary", use_container_width=True):
+                        if edited_prompt.strip():
+                            self.handle_user_input(edited_prompt.strip())
+                            st.rerun()
+                with col2:
+                    if st.form_submit_button("❌ Cancel", use_container_width=True):
+                        st.rerun()
         else:
+            # Regular chat input
+            if prompt := st.chat_input("Ask me anything about Jupiter Money..."):
+                self.handle_user_input(prompt)
+        
+        # Display chat history (newest first)
+        self.display_chat_history_newest_first()
+
+    def display_chat_history_newest_first(self):
+        """Display chat history with newest conversations at the top"""
+        if not st.session_state.messages:
             st.info("👋 Welcome! Ask your first question about Jupiter Money to get started.")
+            return
+        
+        # Group messages in pairs (user + assistant)
+        message_pairs = []
+        for i in range(0, len(st.session_state.messages), 2):
+            if i + 1 < len(st.session_state.messages):
+                message_pairs.append((
+                    st.session_state.messages[i],      # user message
+                    st.session_state.messages[i + 1],  # assistant message
+                    i + 1  # index for feedback
+                ))
+        
+        # Display newest conversations first (reverse order)
+        for user_msg, assistant_msg, feedback_idx in reversed(message_pairs):
+            # User message
+            with st.chat_message("user"):
+                st.markdown(user_msg['content'])
+            
+            # Assistant message
+            with st.chat_message("assistant"):
+                st.markdown(assistant_msg['content'])
+                
+                # Only show feedback buttons and metadata for the most recent message
+                if feedback_idx == len(st.session_state.messages) - 1:
+                    # Show response metadata if available
+                    if hasattr(st.session_state, 'latest_response_metadata'):
+                        metadata_info = st.session_state.latest_response_metadata
+                        self.display_response_metadata(
+                            metadata_info["response"], 
+                            metadata_info["response_time"]
+                        )
+                        
+                        # Generate and display related suggestions
+                        self.display_related_suggestions(
+                            metadata_info["query"], 
+                            metadata_info["response"]
+                        )
+                    
+                    # Add feedback buttons
+                    col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 4])
+                    
+                    with col1:
+                        if st.button("👍", key=f"thumb_up_{feedback_idx}"):
+                            self.handle_feedback(feedback_idx, "positive", "thumbs_up")
+                    
+                    with col2:
+                        if st.button("👎", key=f"thumb_down_{feedback_idx}"):
+                            self.handle_feedback(feedback_idx, "negative", "thumbs_down")
+                    
+                    with col3:
+                        if st.button("⭐", key=f"star_{feedback_idx}"):
+                            self.handle_feedback(feedback_idx, "excellent", "star")
+                    
+                    with col4:
+                        if st.button("📋", key=f"copy_{feedback_idx}"):
+                            st.code(assistant_msg["content"])
+                            st.toast("✅ Copied to clipboard format!")
+            
+            # Add a subtle separator between conversations
+            if feedback_idx < len(st.session_state.messages) - 1:
+                st.markdown("---")
 
     def display_simple_chat_history(self):
         """Display clean, simple chat history - newest first"""
@@ -530,51 +533,48 @@ class JupiterFAQApp:
         # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # Display user message
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        # Generate response
+        with st.spinner("🤔 Thinking..."):
+            start_time = time.time()
+            response = self.generate_response(prompt)
+            end_time = time.time()
         
-        # Generate and display assistant response
-        with st.chat_message("assistant"):
-            response_placeholder = st.empty()
-            
-            with st.spinner("🤔 Thinking..."):
-                start_time = time.time()
-                response = self.generate_response(prompt)
-                end_time = time.time()
-            
-            # Display response
-            response_placeholder.markdown(response["answer"])
-            
-            # Store response
-            st.session_state.messages.append({
-                "role": "assistant", 
-                "content": response["answer"]
-            })
-            
-            # Store analytics
-            analytics_data = {
-                "timestamp": datetime.now(),
-                "query": prompt,
-                "response_time": end_time - start_time,
-                "confidence": response.get("confidence", 0),
-                "method": response.get("metadata", {}).get("generation_method", "unknown"),
-                "documents_found": response.get("metadata", {}).get("documents_found", 0)
-            }
-            
-            st.session_state.conversation_history.append(analytics_data)
-            st.session_state.query_analytics.append(analytics_data)
-            
-            # Show response metadata
-            self.display_response_metadata(response, end_time - start_time)
+        # Add response to messages
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": response["answer"]
+        })
+        
+        # Store analytics
+        analytics_data = {
+            "timestamp": datetime.now(),
+            "query": prompt,
+            "response_time": end_time - start_time,
+            "confidence": response.get("confidence", 0),
+            "method": response.get("metadata", {}).get("generation_method", "unknown"),
+            "documents_found": response.get("metadata", {}).get("documents_found", 0)
+        }
+        
+        st.session_state.conversation_history.append(analytics_data)
+        st.session_state.query_analytics.append(analytics_data)
+        
+        # Store response metadata and suggestions for display
+        st.session_state.latest_response_metadata = {
+            "response": response,
+            "response_time": end_time - start_time,
+            "query": prompt
+        }
+        
+        # Force rerun to display the new messages
+        st.rerun()
 
     def generate_response(self, query: str) -> dict[str, Any]:
         """Generate response using the enhanced model configuration"""
         try:
             system = st.session_state.system_components
             
-            # Get user preferences
-            max_tokens = getattr(st.session_state, 'max_tokens', 500)
+            # Get user preferences with defaults
+            max_tokens = 500  # Default value since we removed the slider
             preferred_model = getattr(st.session_state, 'preferred_groq_model', 'auto')
             
             # Convert "auto" to None for the LLM manager
@@ -661,6 +661,62 @@ class JupiterFAQApp:
             elif metadata.get("guardrails_triggered", False):
                 st.info("🛡️ Safety guardrails were triggered to ensure response quality.")
 
+    def display_related_suggestions(self, query: str, response: dict):
+        """Display AI-generated related query suggestions"""
+        try:
+            system = st.session_state.system_components
+            response_generator = system['response_generator']
+            
+            # Generate suggestions
+            context_docs = response.get("source_documents", [])
+            user_history = st.session_state.conversation_history[-5:] if st.session_state.conversation_history else []
+            
+            suggestions = response_generator.generate_related_suggestions(
+                query=query,
+                context_documents=context_docs,
+                user_history=user_history
+            )
+            
+            if suggestions:
+                st.markdown("### 💡 Related Questions")
+                st.caption("Here are some questions you might also be interested in:")
+                
+                # Display suggestions as clickable buttons
+                cols = st.columns(min(len(suggestions), 3))
+                for i, suggestion in enumerate(suggestions[:3]):
+                    with cols[i % 3]:
+                        suggestion_key = f"sugg_{i}_{hash(suggestion)%1000}_{len(st.session_state.conversation_history)}"
+                        if st.button(suggestion, key=suggestion_key, use_container_width=True):
+                            # User clicked a suggestion - set it as the next query to process
+                            st.session_state.suggestion_clicked = suggestion
+                            st.rerun()
+                
+                # Show additional suggestions if more than 3
+                if len(suggestions) > 3:
+                    with st.expander("🔍 More suggestions", expanded=False):
+                        for j, suggestion in enumerate(suggestions[3:], 4):
+                            suggestion_key = f"sugg_more_{j}_{hash(suggestion)%1000}_{len(st.session_state.conversation_history)}"
+                            if st.button(suggestion, key=suggestion_key, use_container_width=True):
+                                # User clicked a suggestion - set it as the next query to process
+                                st.session_state.suggestion_clicked = suggestion
+                                st.rerun()
+                                
+        except Exception as e:
+            # Show fallback suggestions
+            fallback_suggestions = [
+                "How can I contact Jupiter support?",
+                "What are Jupiter's key features?",
+                "How do I update my account information?"
+            ]
+            
+            st.markdown("### 💡 Common Questions")
+            for i, suggestion in enumerate(fallback_suggestions):
+                fallback_key = f"fallback_{i}_{hash(suggestion)%1000}_{len(st.session_state.conversation_history)}"
+                if st.button(suggestion, key=fallback_key, use_container_width=True):
+                    # User clicked a suggestion - set it as the next query to process
+                    st.session_state.suggestion_clicked = suggestion
+                    st.rerun()
+
     def handle_feedback(self, message_index: int, sentiment: str, type: str):
         """Handle user feedback"""
         feedback_data = {
@@ -740,6 +796,304 @@ class JupiterFAQApp:
         st.markdown("### 📝 Recent Queries")
         recent_df = df.tail(10)[['timestamp', 'query', 'response_time', 'confidence', 'method']]
         st.dataframe(recent_df, use_container_width=True)
+
+    def render_evaluation_dashboard(self):
+        """Render evaluation dashboard with semantic similarity and approach comparison"""
+        st.markdown("# 🧪 Evaluation Dashboard")
+        st.markdown("*Comprehensive evaluation of semantic similarity, relevance, and approach comparison*")
+        
+        if not st.session_state.system_initialized:
+            st.warning("⚠️ System not initialized. Please go to the Chat tab first.")
+            return
+        
+        system = st.session_state.system_components
+        
+        # Check if evaluation is available
+        if not system.get('evaluation_available', False):
+            st.error("🔬 Evaluation system not available. Missing dependencies or initialization failed.")
+            st.info("Required: sentence-transformers, nltk")
+            return
+        
+        st.markdown("## 📊 Evaluation Overview")
+        
+        # Quick evaluation section
+        with st.expander("🚀 Quick Single Query Evaluation", expanded=True):
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                test_query = st.text_input(
+                    "Enter a test query:",
+                    placeholder="e.g., How do I set up UPI in Jupiter?",
+                    help="Enter a question to evaluate across different methods"
+                )
+                
+                expected_answer = st.text_area(
+                    "Expected answer (optional):",
+                    placeholder="Enter the expected answer for semantic similarity comparison...",
+                    help="Optional: Provide expected answer for similarity scoring"
+                )
+                
+            with col2:
+                st.markdown("**Evaluation Methods:**")
+                st.caption("🤖 **Auto**: Smart model selection")
+                st.caption("🔍 **Retrieval Only**: Database search only")
+                st.caption("🧠 **LLM Only**: Pure language model")
+                
+                if st.button("🧪 Run Evaluation", use_container_width=True, type="primary"):
+                    if test_query:
+                        self.run_single_evaluation(test_query, expected_answer)
+                    else:
+                        st.warning("Please enter a test query")
+        
+        # Comprehensive evaluation section
+        st.markdown("## 🔬 Comprehensive Evaluation")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📋 Run Standard Test Suite", use_container_width=True):
+                self.run_comprehensive_evaluation()
+        
+        with col2:
+            if st.button("⚡ Quick Performance Test", use_container_width=True):
+                self.run_quick_performance_test()
+        
+        # Results display section
+        if hasattr(st.session_state, 'evaluation_results'):
+            self.display_evaluation_results()
+        
+        # Methodology documentation
+        with st.expander("📚 Evaluation Methodology", expanded=False):
+            st.markdown("""
+            ### 🔍 Semantic Similarity
+            - Uses paraphrase-multilingual-MiniLM-L12-v2 model
+            - Cosine similarity between embeddings
+            - Supports English, Hindi, and Hinglish
+            
+            ### 📈 Relevance Scoring
+            - Query-answer semantic similarity
+            - Length appropriateness (50-1000 chars optimal)
+            - Jupiter-specific content bonus
+            - Confidence-based weighting
+            
+            ### ⚡ Performance Metrics
+            - **Response Time**: End-to-end latency
+            - **Retrieval Accuracy**: Document relevance scoring
+            - **Confidence Score**: Model certainty
+            - **BLEU Score**: Text similarity metric
+            
+            ### 🔬 Approach Comparison
+            - **Auto Mode**: Intelligent model selection with fallbacks
+            - **Retrieval Only**: Pure vector search + template responses
+            - **LLM Only**: Language model without knowledge base
+            
+            ### 🎯 Quality Measures
+            - Hallucination detection and prevention
+            - Multi-language support evaluation
+            - Context relevance assessment
+            - Response consistency analysis
+            """)
+
+    def run_single_evaluation(self, query: str, expected_answer: str = None):
+        """Run evaluation for a single query across all methods"""
+        try:
+            system = st.session_state.system_components
+            evaluator = system['answer_evaluator']
+            
+            with st.spinner("🧪 Running evaluation across all methods..."):
+                # Evaluate across different methods
+                methods = ["auto", "retrieval_only", "llm_only"]
+                results = {}
+                
+                progress_bar = st.progress(0)
+                
+                for i, method in enumerate(methods):
+                    st.caption(f"Testing {method}...")
+                    result = evaluator.evaluate_single_query(
+                        query=query,
+                        expected_answer=expected_answer,
+                        method=method
+                    )
+                    results[method] = result
+                    progress_bar.progress((i + 1) / len(methods))
+                
+                # Display results
+                st.success("✅ Evaluation completed!")
+                
+                # Comparison table
+                self.display_single_evaluation_results(results, query)
+                
+        except Exception as e:
+            st.error(f"❌ Evaluation failed: {str(e)}")
+            st.error(f"Single evaluation failed: {e}")
+
+    def display_single_evaluation_results(self, results: dict, query: str):
+        """Display results from single query evaluation"""
+        st.markdown("### 📊 Evaluation Results")
+        
+        # Create comparison dataframe
+        comparison_data = []
+        for method, result in results.items():
+            comparison_data.append({
+                "Method": method.replace("_", " ").title(),
+                "Confidence": f"{result.confidence:.1%}",
+                "Response Time": f"{result.response_time:.2f}s",
+                "Semantic Similarity": f"{result.semantic_similarity:.3f}",
+                "Relevance Score": f"{result.relevance_score:.3f}",
+                "Model Used": result.model_used
+            })
+        
+        df = pd.DataFrame(comparison_data)
+        st.dataframe(df, use_container_width=True)
+        
+        # Detailed responses
+        st.markdown("### 💬 Generated Responses")
+        
+        for method, result in results.items():
+            with st.expander(f"📝 {method.replace('_', ' ').title()} Response", expanded=False):
+                st.markdown(f"**Answer:** {result.actual_answer}")
+                st.caption(f"Confidence: {result.confidence:.1%} | Time: {result.response_time:.2f}s | Model: {result.model_used}")
+        
+        # Performance insights
+        st.markdown("### 🎯 Performance Insights")
+        
+        # Best method analysis
+        best_confidence = max(results.values(), key=lambda x: x.confidence)
+        fastest = min(results.values(), key=lambda x: x.response_time)
+        most_relevant = max(results.values(), key=lambda x: x.relevance_score)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("🏆 Highest Confidence", best_confidence.method, f"{best_confidence.confidence:.1%}")
+        
+        with col2:
+            st.metric("⚡ Fastest Response", fastest.method, f"{fastest.response_time:.2f}s")
+        
+        with col3:
+            st.metric("🎯 Most Relevant", most_relevant.method, f"{most_relevant.relevance_score:.3f}")
+
+    def run_comprehensive_evaluation(self):
+        """Run comprehensive evaluation on test dataset"""
+        try:
+            system = st.session_state.system_components
+            evaluator = system['answer_evaluator']
+            
+            with st.spinner("🔬 Running comprehensive evaluation..."):
+                # Run evaluation
+                evaluation_report = evaluator.run_comprehensive_evaluation()
+                
+                # Store results
+                st.session_state.evaluation_results = evaluation_report
+                
+                st.success("✅ Comprehensive evaluation completed!")
+                st.balloons()
+                
+        except Exception as e:
+            st.error(f"❌ Comprehensive evaluation failed: {str(e)}")
+
+    def run_quick_performance_test(self):
+        """Run quick performance test with sample queries"""
+        try:
+            system = st.session_state.system_components
+            response_generator = system['response_generator']
+            
+            test_queries = [
+                "How do I set up UPI?",
+                "Card limit kaise badhaye?",
+                "Contact support",
+                "Investment options in Jupiter"
+            ]
+            
+            with st.spinner("⚡ Running performance test..."):
+                results = []
+                
+                for query in test_queries:
+                    start_time = time.time()
+                    response = response_generator.generate_response(query, max_tokens=200)
+                    end_time = time.time()
+                    
+                    results.append({
+                        "Query": query,
+                        "Response Time": f"{end_time - start_time:.2f}s",
+                        "Confidence": f"{response.get('confidence', 0):.1%}",
+                        "Method": response.get('metadata', {}).get('generation_method', 'unknown'),
+                        "Model": response.get('metadata', {}).get('model_used', 'unknown')
+                    })
+                
+                # Display results
+                st.success("✅ Performance test completed!")
+                
+                df = pd.DataFrame(results)
+                st.dataframe(df, use_container_width=True)
+                
+                # Performance summary
+                avg_time = sum(float(r['Response Time'].replace('s', '')) for r in results) / len(results)
+                st.info(f"📊 Average response time: {avg_time:.2f}s")
+                
+        except Exception as e:
+            st.error(f"❌ Performance test failed: {str(e)}")
+
+    def display_evaluation_results(self):
+        """Display comprehensive evaluation results"""
+        results = st.session_state.evaluation_results
+        
+        st.markdown("### 📈 Comprehensive Evaluation Results")
+        
+        # Summary metrics
+        summaries = results.get('summaries', {})
+        
+        if summaries:
+            st.markdown("#### 🎯 Method Comparison")
+            
+            comparison_data = []
+            for method, summary in summaries.items():
+                comparison_data.append({
+                    "Method": method.replace("_", " ").title(),
+                    "Avg Confidence": f"{summary.avg_confidence:.1%}",
+                    "Avg Response Time": f"{summary.avg_response_time:.2f}s",
+                    "Avg Semantic Similarity": f"{summary.avg_semantic_similarity:.3f}",
+                    "Avg Relevance": f"{summary.avg_relevance_score:.3f}",
+                    "Total Queries": summary.total_queries
+                })
+            
+            df = pd.DataFrame(comparison_data)
+            st.dataframe(df, use_container_width=True)
+            
+            # Visualizations
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Response time comparison
+                methods = list(summaries.keys())
+                times = [summaries[m].avg_response_time for m in methods]
+                
+                fig_time = px.bar(
+                    x=[m.replace("_", " ").title() for m in methods],
+                    y=times,
+                    title="Average Response Time by Method",
+                    labels={'x': 'Method', 'y': 'Response Time (s)'}
+                )
+                st.plotly_chart(fig_time, use_container_width=True)
+            
+            with col2:
+                # Confidence comparison
+                confidences = [summaries[m].avg_confidence for m in methods]
+                
+                fig_conf = px.bar(
+                    x=[m.replace("_", " ").title() for m in methods],
+                    y=confidences,
+                    title="Average Confidence by Method",
+                    labels={'x': 'Method', 'y': 'Confidence Score'}
+                )
+                st.plotly_chart(fig_conf, use_container_width=True)
+        
+        # Recommendations
+        recommendations = results.get('recommendations', [])
+        if recommendations:
+            st.markdown("#### 💡 Recommendations")
+            for rec in recommendations:
+                st.info(rec)
 
     def render_settings_panel(self):
         """Render simplified settings panel"""
@@ -863,7 +1217,7 @@ class JupiterFAQApp:
         self.render_sidebar()
         
         # Main content area with tabs
-        tab1, tab2, tab3 = st.tabs(["💬 Chat", "📊 Analytics", "⚙️ Settings"])
+        tab1, tab2, tab3, tab4 = st.tabs(["💬 Chat", "📊 Analytics", "🧪 Evaluation", "⚙️ Settings"])
         
         with tab1:
             self.render_main_chat()
@@ -872,6 +1226,9 @@ class JupiterFAQApp:
             self.render_analytics_dashboard()
         
         with tab3:
+            self.render_evaluation_dashboard()
+        
+        with tab4:
             self.render_settings_panel()
 
 

@@ -13,7 +13,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.database.data_models import LanguageEnum
-from src.models.llm_manager import LLMManager, ModelType
+from src.models.llm_manager import LLMManager
 from src.models.response_generator import ResponseGenerator
 from src.utils.logger import get_logger
 
@@ -26,7 +26,7 @@ def test_hybrid_llm_manager():
 
     try:
         start_time = time.time()
-        llm_manager = LLMManager(enable_tinyllama=False)  # Start with fast extraction only
+        llm_manager = LLMManager(enable_conversation=False)  # Start with basic mode only
         init_time = time.time() - start_time
         print(f"✅ Fast-only LLM Manager initialized in {init_time:.2f}s")
 
@@ -44,7 +44,7 @@ def test_hybrid_llm_manager():
         print("\n🚀 Testing Fast Extraction Mode:")
         start_time = time.time()
         response, confidence = llm_manager.generate_response(
-            prompt="How to reset PIN?", context=test_context, force_mode=ModelType.FAST_EXTRACT
+            prompt="How to reset PIN?", context=test_context
         )
         fast_time = time.time() - start_time
 
@@ -56,7 +56,7 @@ def test_hybrid_llm_manager():
         print("\n🤖 Testing TinyLlama Mode (no context):")
         start_time = time.time()
         response, confidence = llm_manager.generate_response(
-            prompt="How to transfer money?", force_mode=ModelType.TINYLLAMA
+            prompt="How to transfer money?"
         )
         tinyllama_time = time.time() - start_time
 
@@ -81,7 +81,7 @@ def test_full_hybrid_manager():
 
     try:
         start_time = time.time()
-        llm_manager = LLMManager(enable_tinyllama=True)  # Enable both models
+        llm_manager = LLMManager(enable_conversation=True)  # Enable conversation models
         init_time = time.time() - start_time
         print(f"✅ Full Hybrid LLM Manager initialized in {init_time:.2f}s")
 
@@ -157,16 +157,15 @@ def test_hybrid_response_generator():
             print(f"Expected: {test_case['description']} ({test_case['expected_speed']})")
 
             start_time = time.time()
-            result = response_gen.generate_response(query, language=LanguageEnum.ENGLISH)
+            result = response_gen.generate_response(query)
             total_time = time.time() - start_time
 
             print(f"⏱️ Total time: {total_time:.2f}s")
-            print(f"📝 Response: {result.response[:150]}...")
-            print(f"📊 Confidence: {result.confidence_score}")
-            print(f"🔍 Retrieved docs: {result.retrieved_docs_count}")
-            print(f"⚡ Model used: {result.model_used}")
-            print(f"⏰ Generation time: {result.generation_time_ms}ms")
-            print(f"🔍 Retrieval time: {result.retrieval_time_ms}ms")
+            print(f"📝 Response: {result.get('answer', '')[:150]}...")
+            print(f"📊 Confidence: {result.get('confidence', 0)}")
+            print(f"🔍 Retrieved docs: {len(result.get('source_documents', []))}")
+            print(f"⚡ Model used: {result.get('metadata', {}).get('model_used', 'unknown')}")
+            print(f"⏰ Generation method: {result.get('metadata', {}).get('generation_method', 'unknown')}")
 
             # Analyze performance
             if total_time < 5:
@@ -179,7 +178,8 @@ def test_hybrid_response_generator():
             print(f"🎯 Actual speed: {actual_speed}")
 
             # Check if response is reasonable
-            if len(result.response) > 20:
+            response_text = result.get('answer', '')
+            if len(response_text) > 20:
                 print("✅ Response quality: Good")
             else:
                 print("⚠️ Response quality: Poor")
@@ -196,7 +196,7 @@ def run_performance_comparison():
     print("\n📊 Performance Comparison...")
 
     try:
-        llm_manager = LLMManager(enable_tinyllama=False)  # Fast extraction only for comparison
+        llm_manager = LLMManager(enable_conversation=False)  # Basic mode only for comparison
 
         test_query = "How to reset PIN?"
         test_context = "To reset your PIN: 1. Open Jupiter app 2. Go to Cards 3. Select Reset PIN 4. Follow verification"
@@ -204,7 +204,7 @@ def run_performance_comparison():
         # Test fast extraction
         print("🚀 Fast Extraction Performance:")
         times = []
-        for i in range(3):
+        for _i in range(3):
             start = time.time()
             response, conf = llm_manager.generate_response(
                 prompt=test_query, context=test_context, force_mode=ModelType.FAST_EXTRACT
@@ -218,7 +218,7 @@ def run_performance_comparison():
         # Test TinyLlama without context
         print("\n🤖 TinyLlama Performance (no context):")
         times = []
-        for i in range(1):  # Only test once due to slower performance
+        for _i in range(1):  # Only test once due to slower performance
             start = time.time()
             response, conf = llm_manager.generate_response(
                 prompt=test_query,

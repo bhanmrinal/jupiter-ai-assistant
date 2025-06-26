@@ -34,12 +34,6 @@ class LLMManager:
             "speed": "~0.5s",
             "context": "8k",
             "best_for": "Balanced performance"
-        },
-        "mixtral-8x7b-32768": {
-            "name": "Mixtral 8x7B",
-            "speed": "~0.6s",
-            "context": "32k",
-            "best_for": "Multilingual support"
         }
     }
 
@@ -204,7 +198,7 @@ class LLMManager:
                     
         elif complexity == "complex" or query_length > 500:
             # Prefer powerful models for complex queries
-            for model in ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]:
+            for model in ["llama-3.3-70b-versatile"]:
                 if model in self.available_groq_models:
                     return model
         
@@ -212,8 +206,7 @@ class LLMManager:
         priority_order = [
             "llama-3.3-70b-versatile",
             "llama-3.1-8b-instant", 
-            "gemma2-9b-it",
-            "mixtral-8x7b-32768"
+            "gemma2-9b-it"
         ]
         
         for model in priority_order:
