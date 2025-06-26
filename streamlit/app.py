@@ -20,9 +20,24 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+# Fix for ChromaDB SQLite version compatibility on Streamlit Cloud
+try:
+    import sqlite3
+    # Check SQLite version and fix if needed
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        # Try to use pysqlite3 as replacement
+        try:
+            import pysqlite3
+            sys.modules['sqlite3'] = pysqlite3
+        except ImportError:
+            # If pysqlite3 not available, we'll handle this gracefully
+            pass
+except ImportError:
+    pass
+
 # Set page config first
 st.set_page_config(
-    page_title="Jupiter FAQ Bot",
+    page_title="Jupiter AI FAQ-Bot",
     page_icon="🪐",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -52,6 +67,7 @@ class JupiterFAQApp:
     def __init__(self):
         self.initialize_session_state()
         self.setup_system()
+        self.apply_custom_css()
 
     def initialize_session_state(self):
         """Initialize session state variables"""
@@ -72,6 +88,51 @@ class JupiterFAQApp:
             
         if 'user_feedback' not in st.session_state:
             st.session_state.user_feedback = []
+
+    def apply_custom_css(self):
+        """Apply custom CSS for better UX"""
+        st.markdown("""
+        <style>
+        /* Fix chat input staying at top */
+        .stTextInput > div > div > input {
+            font-size: 16px;
+            padding: 12px;
+            border-radius: 8px;
+        }
+        
+        /* Improve button styling */
+        .stButton > button {
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        
+        /* Better spacing for expanders */
+        .streamlit-expanderHeader {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        /* Improve info/success boxes */
+        .stAlert {
+            border-radius: 8px;
+            margin: 8px 0;
+        }
+        
+        /* Custom styling for chat containers */
+        .chat-container {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 12px;
+            margin: 10px 0;
+            border-left: 4px solid #667eea;
+        }
+        
+        /* Feedback button styling */
+        .feedback-buttons {
+            margin-top: 10px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
     @st.cache_resource
     def setup_system(_self):
@@ -95,66 +156,58 @@ class JupiterFAQApp:
             return None
 
     def render_sidebar(self):
-        """Render the sidebar with controls and information"""
+        """Render clean, simplified sidebar"""
         with st.sidebar:
             st.markdown("# 🪐 Jupiter FAQ Bot")
             st.markdown("*AI-powered customer support*")
             st.divider()
             
-            # Model Selection
-            st.markdown("### 🤖 AI Model Configuration")
+            # Model Selection - simplified
+            st.markdown("### 🤖 AI Model")
             model_options = [
-                "Auto (Groq + DistilBERT)",
-                "Groq Llama-3.3-70B Only",
-                "DistilBERT Q&A Only",
-                "Fallback Mode"
+                "Auto (Recommended)",
+                "Groq Only", 
+                "DistilBERT Only"
             ]
             
             selected_model = st.selectbox(
-                "Choose AI Model:",
+                "Choose Model:",
                 model_options,
                 index=0,
-                help="Select the AI model for generating responses"
+                help="Auto mode uses the best available model"
             )
             
             if selected_model != st.session_state.current_model:
                 st.session_state.current_model = selected_model
                 st.rerun()
             
-            # Response Settings
-            st.markdown("### ⚙️ Response Settings")
-            max_tokens = st.slider("Max Response Length", 50, 500, 200, 25)
+            # Quick Stats (only if system is running)
+            if st.session_state.system_initialized and st.session_state.conversation_history:
+                st.markdown("### 📊 Session Stats")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Queries", len(st.session_state.conversation_history))
+                with col2:
+                    avg_time = self.calculate_average_response_time()
+                    st.metric("Avg Time", f"{avg_time:.1f}s")
             
-            similarity_threshold = st.slider(
-                "Search Similarity Threshold", 
-                0.1, 0.9, 0.4, 0.05,
-                help="Higher values = more precise matches"
-            )
-            
-            # Quick Stats
+            # System Status - simplified
+            st.markdown("### 🔧 System Status")
             if st.session_state.system_initialized:
-                self.render_quick_stats()
-            
-            # Data Sources Info
-            st.markdown("### 📊 Data Sources")
-            with st.expander("Content Information", expanded=False):
-                st.markdown("""
-                **185 Documents** from:
-                - 🏛️ Help Center (Official docs)
-                - 👥 Community (User discussions)
-                - 📝 Blog (Financial articles)
-                - ❓ FAQ (Direct Q&A)
+                st.success("🟢 All systems online")
+            else:
+                st.warning("🟡 Initializing...")
                 
-                **Categories:**
-                - Banking & Payments
-                - Investments & Loans
-                - Cards & UPI
-                - Technical Support
-                - Community Features
-                """)
+            # Data Info - minimal
+            st.markdown("### 📚 Knowledge Base")
+            st.info("185 Jupiter Money documents loaded")
             
-            # System Status
-            self.render_system_status()
+            # Clear chat button
+            st.divider()
+            if st.button("🗑️ Clear Chat", use_container_width=True):
+                st.session_state.messages = []
+                st.session_state.conversation_history = []
+                st.rerun()
 
     def render_quick_stats(self):
         """Render quick statistics"""
@@ -200,30 +253,117 @@ class JupiterFAQApp:
             st.error(f"System check failed: {e}")
 
     def render_main_chat(self):
-        """Render the main chat interface"""
-        st.markdown("# 💬 Chat with Jupiter FAQ Bot")
-        st.markdown("Ask me anything about Jupiter Money - banking, investments, cards, UPI, and more!")
-        
+        """Render clean, simple chat interface"""
         # Initialize system if needed
         if not st.session_state.system_initialized:
-            system = self.setup_system()
-            if system:
-                st.session_state.system_components = system
-                st.session_state.system_initialized = True
-                st.success("✅ System initialized successfully!")
-            else:
-                st.error("❌ Failed to initialize system")
-                return
+            with st.spinner("🚀 Initializing Jupiter FAQ Bot..."):
+                system = self.setup_system()
+                if system:
+                    st.session_state.system_components = system
+                    st.session_state.system_initialized = True
+                else:
+                    st.error("❌ Failed to initialize system")
+                    return
 
-        # Display chat messages
-        self.display_chat_history()
+        # Clean header
+        st.markdown("# 🪐 Jupiter AI Assistant")
+        st.markdown("*Your AI Help-Desk for Jupiter Money *")
         
-        # Chat input
-        if prompt := st.chat_input("Ask about Jupiter Money... (e.g., 'How to reset my PIN?')"):
-            self.handle_user_input(prompt)
+        # Simple chat input
+        with st.form("chat_form", clear_on_submit=True):
+            prompt = st.text_input(
+                "💬 Ask your question:",
+                placeholder="e.g., How to reset my PIN? What are Jupiter's investment options?",
+                help="Ask anything about Jupiter Money - banking, payments, investments, cards, UPI, and more!"
+            )
+            submitted = st.form_submit_button("Ask", type="primary", use_container_width=True)
+        
+        # Handle form submission
+        if submitted and prompt.strip():
+            self.handle_user_input(prompt.strip())
+        
+        # Chat history - simple display
+        if st.session_state.messages:
+            st.markdown("---")
+            self.display_simple_chat_history()
+        else:
+            st.info("👋 Welcome! Ask your first question about Jupiter Money to get started.")
+
+    def display_simple_chat_history(self):
+        """Display clean, simple chat history - newest first"""
+        # Group messages in pairs and reverse for newest first
+        message_pairs = []
+        for i in range(0, len(st.session_state.messages), 2):
+            if i + 1 < len(st.session_state.messages):
+                message_pairs.append((
+                    st.session_state.messages[i],      # user message
+                    st.session_state.messages[i + 1],  # assistant message
+                    i + 1  # index for feedback
+                ))
+        
+        # Display newest conversations first
+        for user_msg, assistant_msg, feedback_idx in reversed(message_pairs):
+            # User question
+            with st.container():
+                st.markdown(f"**You asked:** {user_msg['content']}")
+                
+                # Bot response
+                st.markdown("**Jupiter Bot:**")
+                st.markdown(assistant_msg['content'])
+                
+                # Simple feedback
+                col1, col2, col3 = st.columns([1, 1, 6])
+                with col1:
+                    if st.button("👍", key=f"up_{feedback_idx}", help="Helpful"):
+                        self.handle_feedback(feedback_idx, "positive", "thumbs_up")
+                with col2:
+                    if st.button("👎", key=f"down_{feedback_idx}", help="Not helpful"):
+                        self.handle_feedback(feedback_idx, "negative", "thumbs_down")
+                
+                st.markdown("---")
+
+    def display_chat_history_improved(self):
+        """Display chat history with improved UX - newest first (legacy)"""
+        # Group messages in pairs (user question + bot answer)
+        message_pairs = []
+        for i in range(0, len(st.session_state.messages), 2):
+            if i + 1 < len(st.session_state.messages):
+                message_pairs.append((
+                    st.session_state.messages[i],      # user message
+                    st.session_state.messages[i + 1],  # assistant message
+                    i + 1  # index for feedback
+                ))
+        
+        # Display newest conversations first
+        for user_msg, assistant_msg, feedback_idx in reversed(message_pairs):
+            # Create expandable container for each conversation
+            with st.expander(f"🔍 {user_msg['content'][:60]}{'...' if len(user_msg['content']) > 60 else ''}", expanded=True):
+                # User question
+                st.markdown("**Your Question:**")
+                st.info(user_msg['content'])
+                
+                # Bot response  
+                st.markdown("**Jupiter Bot Response:**")
+                st.success(assistant_msg['content'])
+                
+                # Feedback section
+                st.markdown("**Was this helpful?**")
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 5])
+                
+                with col1:
+                    if st.button("👍", key=f"thumb_up_{feedback_idx}"):
+                        self.handle_feedback(feedback_idx, "positive", "thumbs_up")
+                
+                with col2:
+                    if st.button("👎", key=f"thumb_down_{feedback_idx}"):
+                        self.handle_feedback(feedback_idx, "negative", "thumbs_down")
+                
+                with col3:
+                    if st.button("⭐", key=f"star_{feedback_idx}"):
+                        self.handle_feedback(feedback_idx, "excellent", "star")
 
     def display_chat_history(self):
-        """Display the chat message history"""
+        """Display the chat message history (legacy method)"""
         for i, message_data in enumerate(st.session_state.messages):
             with st.chat_message(message_data["role"]):
                 st.markdown(message_data["content"])
@@ -429,76 +569,114 @@ class JupiterFAQApp:
         recent_df = df.tail(10)[['timestamp', 'query', 'response_time', 'confidence', 'method']]
         st.dataframe(recent_df, use_container_width=True)
 
-    def render_admin_panel(self):
-        """Render admin panel for system management"""
-        st.markdown("# 🔧 Admin Panel")
+    def render_settings_panel(self):
+        """Render simplified settings panel"""
+        st.markdown("# ⚙️ Settings")
         
-        # System Information
+        if not st.session_state.system_initialized:
+            st.warning("⚠️ System not initialized. Please go to the Chat tab first.")
+            return
+        
+        # System Status
+        st.markdown("## 🔧 System Status")
+        
+        system = st.session_state.system_components
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Database status
+            try:
+                doc_count = len(system['chroma_client'].collection.get()['ids'])
+                st.metric("📄 Documents", doc_count)
+                if doc_count > 0:
+                    st.success("✅ Database Online")
+                else:
+                    st.warning("⚠️ No documents loaded")
+            except Exception:
+                st.error("❌ Database Error")
+        
+        with col2:
+            # API status
+            api_key_status = "✅ Connected" if os.getenv("GROQ_API_KEY") else "❌ Not Set"
+            st.metric("🔑 Groq API", api_key_status)
+            
+        with col3:
+            # Model status
+            try:
+                model_info = system['llm_manager'].get_model_info()
+                model_count = sum(1 for model in model_info['models'].values() if model['loaded'])
+                st.metric("🤖 Models", f"{model_count}/2")
+                if model_count >= 1:
+                    st.success("✅ Models Ready")
+                else:
+                    st.error("❌ Models Error")
+            except:
+                st.error("❌ Models Error")
+        
+        st.divider()
+        
+        # Configuration
+        st.markdown("## ⚙️ Configuration")
+        
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("### 🖥️ System Information")
-            if st.session_state.system_initialized:
-                system = st.session_state.system_components
-                model_info = system['llm_manager'].get_model_info()
-                
-                st.json({
-                    "Status": model_info.get("status", "unknown"),
-                    "Device": model_info.get("device", "unknown"),
-                    "Models": {
-                        "Groq": model_info["models"]["groq_conversation"]["loaded"],
-                        "DistilBERT": model_info["models"]["distilbert_qa"]["loaded"]
-                    }
-                })
+            st.markdown("### 🎛️ Response Settings")
+            max_tokens = st.slider("Max Response Length", 50, 500, 200, 25)
+            similarity_threshold = st.slider("Search Precision", 0.1, 0.9, 0.4, 0.05)
             
-            # Clear data buttons
-            st.markdown("### 🗑️ Data Management")
-            col_a, col_b = st.columns(2)
+        with col2:
+            st.markdown("### 🔍 Test Search")
+            test_query = st.text_input("Test query:", placeholder="e.g., How to reset PIN?")
             
-            with col_a:
-                if st.button("Clear Chat History", type="secondary"):
-                    st.session_state.messages = []
-                    st.session_state.conversation_history = []
-                    st.toast("✅ Chat history cleared!")
-            
-            with col_b:
-                if st.button("Clear Analytics", type="secondary"):
-                    st.session_state.query_analytics = []
-                    st.session_state.user_feedback = []
-                    st.toast("✅ Analytics cleared!")
+            if st.button("🔍 Test") and test_query:
+                try:
+                    with st.spinner("Searching..."):
+                        results = system['retriever'].search(test_query, top_k=2)
+                    st.success(f"✅ Found {len(results)} relevant documents")
+                    for i, doc in enumerate(results[:2]):
+                        st.text(f"{i+1}. {doc.question[:80]}... (Score: {doc.similarity_score:.2f})")
+                except Exception as e:
+                    st.error(f"❌ Search failed: {str(e)}")
+        
+        st.divider()
+        
+        # Data Management
+        st.markdown("## 📊 Data Management")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔄 Refresh System", use_container_width=True):
+                st.cache_resource.clear()
+                st.session_state.system_initialized = False
+                st.success("✅ System will refresh on next chat")
         
         with col2:
-            st.markdown("### 📈 Real-time Metrics")
-            
-            # System health check
-            if st.button("🔍 Run Health Check"):
-                with st.spinner("Running health check..."):
-                    try:
-                        system = st.session_state.system_components
-                        health_status = {
-                            "LLM Manager": system['llm_manager'].health_check(),
-                            "Retriever": system['retriever'].health_check(),
-                            "Response Generator": system['response_generator'].health_check()
-                        }
-                        
-                        for component, status in health_status.items():
-                            if status:
-                                st.success(f"✅ {component}: Healthy")
-                            else:
-                                st.error(f"❌ {component}: Error")
-                                
-                    except Exception as e:
-                        st.error(f"Health check failed: {e}")
-            
-            # Environment variables
-            st.markdown("### 🔐 Environment")
-            env_status = {
-                "GROQ_API_KEY": "✅ Set" if os.getenv("GROQ_API_KEY") else "❌ Missing",
-                "Environment": "Production" if os.getenv("ENVIRONMENT") == "prod" else "Development"
-            }
-            
-            for key, value in env_status.items():
-                st.text(f"{key}: {value}")
+            if st.session_state.messages:
+                if st.button("🗑️ Clear Chat History", use_container_width=True):
+                    st.session_state.messages = []
+                    st.session_state.conversation_history = []
+                    st.success("✅ Chat history cleared")
+        
+        with col3:
+            # Export data
+            if st.session_state.conversation_history:
+                import json
+                data = {
+                    'total_queries': len(st.session_state.conversation_history),
+                    'conversations': st.session_state.conversation_history[-10:],  # Last 10 only
+                    'export_time': datetime.now().isoformat()
+                }
+                
+                st.download_button(
+                    "📥 Export Data",
+                    data=json.dumps(data, indent=2, default=str),
+                    file_name=f"chat_export_{datetime.now().strftime('%Y%m%d')}.json",
+                    mime="application/json",
+                    use_container_width=True
+                )
 
     def calculate_average_response_time(self) -> float:
         """Calculate average response time"""
@@ -513,7 +691,7 @@ class JupiterFAQApp:
         self.render_sidebar()
         
         # Main content area with tabs
-        tab1, tab2, tab3 = st.tabs(["💬 Chat", "📊 Analytics", "🔧 Admin"])
+        tab1, tab2, tab3 = st.tabs(["💬 Chat", "📊 Analytics", "⚙️ Settings"])
         
         with tab1:
             self.render_main_chat()
@@ -522,7 +700,7 @@ class JupiterFAQApp:
             self.render_analytics_dashboard()
         
         with tab3:
-            self.render_admin_panel()
+            self.render_settings_panel()
 
 
 def main():
