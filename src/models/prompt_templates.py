@@ -76,8 +76,6 @@ Is there anything else about Jupiter's general banking services I can help you w
 
 Answer in {detected_language}:"""
 
-
-
     @staticmethod
     def get_followup_generation_template() -> str:
         """Template for generating follow-up questions using LLM"""

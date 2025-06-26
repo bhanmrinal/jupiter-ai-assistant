@@ -1,242 +1,260 @@
 """
 Response Generator for Jupiter FAQ Bot
 
-Combines retrieval and LLM generation for RAG-powered responses:
-- Context injection from retrieved documents
-- Prompt engineering for financial domain
-- Response validation and confidence scoring
+Production-ready response generation using Groq API.
+Clean architecture without hardcoded patterns.
 """
 
-from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from loguru import logger as log
-
-from config.settings import settings
-from src.database.data_models import LanguageEnum
-from src.models.llm_manager import LLMManager, ModelType
+from src.database.data_models import QueryResult
+from src.models.llm_manager import LLMManager
 from src.models.prompt_templates import PromptTemplates
-from src.models.retriever import RetrievalResult, Retriever
+from src.models.retriever import Retriever
+from src.utils.logger import get_logger
 
-
-@dataclass
-class GenerationResult:
-    """Complete response generation result"""
-
-    response: str
-    confidence_score: float
-    sources_used: list[str]
-    retrieved_docs_count: int
-    model_used: str
-    generation_time_ms: int
-    retrieval_time_ms: int
-    language: LanguageEnum
-    suggested_followup: str | None = None
+log = get_logger(__name__)
 
 
 class ResponseGenerator:
-    """Generates RAG-powered responses for Jupiter FAQ queries"""
+    """Generates responses using Groq API and semantic retrieval"""
 
-    def __init__(self, llm_manager=None, retriever=None):
-        # Use provided instances or create new ones
-        self.llm_manager = llm_manager if llm_manager is not None else LLMManager()
-        self.retriever = retriever if retriever is not None else Retriever()
-        self.confidence_threshold = settings.model.confidence_threshold
-
-        log.info("ResponseGenerator initialized")
-
-    def generate_response(
-        self, query: str, language: LanguageEnum = None, category_hint: str = None
-    ) -> GenerationResult:
+    def __init__(self, retriever: Retriever, llm_manager: LLMManager):
         """
-        Generate a comprehensive response using RAG
+        Initialize response generator
 
         Args:
-            query: User query text
-            language: Query language for appropriate response
-            category_hint: Optional category hint for better retrieval
+            retriever: Document retriever instance
+            llm_manager: LLM manager instance
+        """
+        self.retriever = retriever
+        self.llm_manager = llm_manager
+        self.prompt_templates = PromptTemplates()
+
+    def generate_response(self, query: str, max_tokens: int = 200) -> dict[str, Any]:
+        """
+        Generate response for user query
+
+        Args:
+            query: User query string
+            max_tokens: Maximum tokens for response
 
         Returns:
-            GenerationResult with response and metadata
+            Response dictionary with answer and metadata
         """
-        start_time = datetime.now()
+        start_time = datetime.utcnow()
 
         try:
+            log.info(f"Generating response for: {query[:50]}...")
+
             # Step 1: Retrieve relevant documents
-            log.info(f"Generating response for query: {query[:50]}...")
+            retrieval_result = self.retriever.search(query=query, top_k=3, similarity_threshold=0.4)
 
-            retrieval_result = self.retriever.retrieve(
-                query=query, language=language, category_filter=category_hint
-            )
-
-            # Step 2: Determine language  
-            detected_language = (
-                retrieval_result.language if retrieval_result.language else LanguageEnum.ENGLISH
-            )
-
-            # Step 3: Generate response with context
-            if retrieval_result.total_found > 0:
-                response, confidence = self._generate_with_context(
-                    query=query,
-                    retrieval_result=retrieval_result,
-                    language=detected_language,
-                )
+            # Step 2: Generate response based on retrieval results
+            if retrieval_result.matched_documents and retrieval_result.confidence > 0.3:
+                response = self._generate_contextual_response(query, retrieval_result, max_tokens)
             else:
-                response, confidence = self._generate_without_context(
-                    query=query, language=detected_language
-                )
+                response = self._generate_fallback_response(query, max_tokens)
 
-            # Step 4: Post-process response
-            response = self._post_process_response(response, detected_language)
+            # Step 3: Calculate response time
+            end_time = datetime.utcnow()
+            response_time = (end_time - start_time).total_seconds()
 
-            # Step 5: Generate suggested follow-up
-            followup = self._generate_followup(query, retrieval_result)
-
-            # Calculate timing
-            end_time = datetime.now()
-            total_time_ms = int((end_time - start_time).total_seconds() * 1000)
-            generation_time_ms = total_time_ms - retrieval_result.retrieval_time_ms
-
-            # Collect sources
-            sources_used = [doc.source_url for doc in retrieval_result.documents]
-
-            result = GenerationResult(
-                response=response,
-                confidence_score=confidence,
-                sources_used=sources_used,
-                retrieved_docs_count=retrieval_result.total_found,
-                model_used="TinyLlama-1.1B",
-                generation_time_ms=generation_time_ms,
-                retrieval_time_ms=retrieval_result.retrieval_time_ms,
-                language=detected_language,
-                suggested_followup=followup,
-            )
-
-            log.info(f"Response generated with confidence: {confidence:.2f}")
-            return result
+            # Step 4: Prepare final response
+            return {
+                "answer": response.get(
+                    "answer", "I apologize, but I'm unable to provide a response at the moment."
+                ),
+                "confidence": response.get("confidence", 0.0),
+                "source_documents": [
+                    {
+                        "question": doc.question,
+                        "similarity": getattr(doc, "similarity_score", 0.0),
+                        "source_url": doc.metadata.source_url,
+                    }
+                    for doc in retrieval_result.matched_documents[:2]
+                ],
+                "metadata": {
+                    "query": query,
+                    "response_time_seconds": round(response_time, 3),
+                    "retrieval_confidence": retrieval_result.confidence,
+                    "documents_found": retrieval_result.total_matches,
+                    "generation_method": response.get("method", "unknown"),
+                    "timestamp": start_time.isoformat(),
+                },
+            }
 
         except Exception as e:
-            log.error(f"Error generating response: {e}")
-            return self._generate_error_response(query, str(e))
+            log.error(f"Response generation failed: {e}")
+            return self._create_error_response(query, str(e))
 
-    def _generate_with_context(
-        self,
-        query: str,
-        retrieval_result: RetrievalResult,
-        language: LanguageEnum,
-    ) -> tuple[str, float]:
+    def _generate_contextual_response(
+        self, query: str, retrieval_result: QueryResult, max_tokens: int
+    ) -> dict[str, Any]:
         """Generate response using retrieved context"""
+        try:
+            # Prepare context from retrieved documents
+            context = self._format_context(retrieval_result.matched_documents)
 
-        # Select appropriate prompt template
-        # Use centralized template selection
-        template = PromptTemplates.get_template_by_language(language)
+            # Detect language (simple detection)
+            detected_language = self._detect_language(query)
 
-        # Build prompt with context
-        prompt = template.format(
-            context=retrieval_result.context_text,
-            query=query,
-            num_sources=retrieval_result.total_found,
-            detected_language=language.value,
-            predicted_category=retrieval_result.suggested_category or "general",
-            retrieval_confidence=f"{len(retrieval_result.documents)}/{retrieval_result.total_found} matches",
-        )
+            # Create system prompt
+            system_prompt = self._create_system_prompt(context, detected_language)
 
-        # Generate response with context for hybrid model
-        response, base_confidence = self.llm_manager.generate_response(
-            prompt=query,  # Use original query instead of full prompt
-            context=retrieval_result.context_text,  # Pass context for fast extraction
-            language=language, 
-            max_tokens=300, 
-            temperature=0.7
-        )
+            # PRIMARY: Try Groq conversation generation first
+            if self.llm_manager.conversation_loaded:
+                answer, confidence = self.llm_manager.generate_conversation(
+                    system_prompt=system_prompt, user_query=query, max_tokens=max_tokens
+                )
 
-        return response, base_confidence
+                if answer and len(answer.strip()) > 10:  # Valid response
+                    return {"answer": answer, "confidence": confidence, "method": "groq_contextual"}
 
-    def _generate_without_context(
-        self, query: str, language: LanguageEnum
-    ) -> tuple[str, float]:
-        """Generate response without retrieved context"""
+            # FALLBACK 1: DistilBERT Q&A extraction if Groq fails
+            best_doc = retrieval_result.matched_documents[0]
+            extracted_answer, extract_confidence = self.llm_manager.extract_answer(
+                query, best_doc.answer
+            )
 
-        prompt = PromptTemplates.get_no_context_template().format(
-            query=query, detected_language=language.value
-        )
+            if extracted_answer and len(extracted_answer.strip()) > 5:
+                return {
+                    "answer": f"Based on our documentation: {extracted_answer}",
+                    "confidence": extract_confidence * 0.8,  # Lower confidence for fallback
+                    "method": "distilbert_fallback",
+                }
 
-        response, confidence = self.llm_manager.generate_response(
-            prompt=query,  # Use original query 
-            context=None,  # No context available
-            language=language, 
-            max_tokens=200, 
-            temperature=0.8
-        )
+            # FALLBACK 2: Direct document match as last resort
+            return {
+                "answer": f"Here's what I found: {best_doc.answer}",
+                "confidence": retrieval_result.confidence * 0.6,  # Even lower confidence
+                "method": "direct_match_fallback",
+            }
 
-        return response, confidence
+        except Exception as e:
+            log.error(f"Contextual response generation failed: {e}")
+            return {"answer": "", "confidence": 0.0, "method": "error"}
 
-    def _post_process_response(self, response: str, language: LanguageEnum) -> str:
-        """Clean the generated response"""
-        response = response.strip()
-        if response and response[-1] not in ".!?":
-            response += "."
-        return response
+    def _generate_fallback_response(self, query: str, max_tokens: int) -> dict[str, Any]:
+        """Generate fallback response when no good context is found"""
+        try:
+            # Use Groq for general conversation
+            if self.llm_manager.conversation_loaded:
+                system_prompt = self._create_general_system_prompt()
 
-    def _generate_followup(self, query: str, retrieval_result: RetrievalResult) -> str | None:
-        """Generate suggested follow-up question using LLM"""
+                answer, confidence = self.llm_manager.generate_conversation(
+                    system_prompt=system_prompt, user_query=query, max_tokens=max_tokens
+                )
 
-        if not retrieval_result.documents:
-            return None
+                if answer and len(answer.strip()) > 10:  # Valid response
+                    return {
+                        "answer": answer,
+                        "confidence": confidence * 0.7,  # Lower confidence for no-context
+                        "method": "groq_general",
+                    }
 
-        # Prepare context summary for follow-up generation
-        context_summary = f"Found {len(retrieval_result.documents)} relevant documents about {retrieval_result.suggested_category}"
-        if retrieval_result.documents:
-            # Use first document's answer as context hint
-            context_summary += f". Main topic: {retrieval_result.documents[0].question[:50]}..."
+            # Final fallback
+            return {
+                "answer": "I apologize, but I don't have specific information about that. Please contact Jupiter Money support for detailed assistance.",
+                "confidence": 0.3,
+                "method": "static_fallback",
+            }
 
-        # Use LLM to generate contextual follow-up question
-        followup_prompt = PromptTemplates.get_followup_generation_template().format(
-            query=query,
-            category=retrieval_result.suggested_category or "general",
-            context_summary=context_summary,
-        )
+        except Exception as e:
+            log.error(f"Fallback response generation failed: {e}")
+            return {
+                "answer": "I'm experiencing technical difficulties. Please try again or contact support.",
+                "confidence": 0.1,
+                "method": "error_fallback",
+            }
 
-        # Generate follow-up using fast mode for quick suggestions
-        followup_response, _ = self.llm_manager.generate_response(
-            prompt=followup_prompt,
-            context=context_summary,  # Use context summary for follow-up
-            language=LanguageEnum.ENGLISH,
-            force_mode=ModelType.TINYLLAMA,  # Use TinyLlama for follow-ups
-            max_tokens=50,  # Keep follow-ups short
-            temperature=0.3,  # Low temperature for consistent suggestions
-        )
+    def _format_context(self, documents: list) -> str:
+        """Format retrieved documents into context text"""
+        if not documents:
+            return ""
 
-        # Clean and validate the response
-        followup = followup_response.strip()
-        if followup and len(followup) > 10 and "?" in followup:
-            # Extract just the question if LLM added extra text
-            if "?" in followup:
-                followup = followup.split("?")[0] + "?"
-            return followup
+        context_parts = []
+        for i, doc in enumerate(documents[:3], 1):  # Limit to top 3
+            context_parts.append(f"Context {i}:")
+            context_parts.append(f"Q: {doc.question}")
+            context_parts.append(f"A: {doc.answer}")
+            context_parts.append("")
 
-        return None
+        return "\n".join(context_parts)
 
-    def _generate_error_response(self, query: str, error: str) -> GenerationResult:
-        """Generate error response when something goes wrong"""
+    def _create_system_prompt(self, context: str, language: str) -> str:
+        """Create system prompt for contextual response"""
+        return f"""You are Jupiter Money's helpful customer service assistant for India's financial wellness community.
 
-        return GenerationResult(
-            response="I apologize, but I'm having trouble processing your request right now. Please try again later or contact Jupiter support for assistance.",
-            confidence_score=0.0,
-            sources_used=[],
-            retrieved_docs_count=0,
-            model_used="error",
-            generation_time_ms=0,
-            retrieval_time_ms=0,
-            language=LanguageEnum.ENGLISH,
-            suggested_followup=None,
-        )
+CONTEXT INFORMATION:
+{context}
+
+INSTRUCTIONS:
+1. Answer based ONLY on the provided context above
+2. Respond in {language} language naturally
+3. Be helpful, concise, and accurate  
+4. Include relevant steps when applicable
+5. If context doesn't contain enough information, say so politely
+6. Maintain a friendly, professional tone appropriate for Indian users
+7. Don't mention that you're an AI or refer to the context directly
+8. For financial advice, ensure regulatory compliance
+9. Keep responses conversational and culturally appropriate for India
+
+Provide a helpful response in {language}:"""
+
+    def _create_general_system_prompt(self) -> str:
+        """Create system prompt for general responses"""
+        return """You are Jupiter Money's helpful customer service assistant for India's financial wellness community.
+
+INSTRUCTIONS:
+1. Provide general guidance about banking and financial services
+2. Be helpful, friendly, and professional
+3. Maintain a tone appropriate for Indian users
+4. If you don't have specific information, suggest contacting Jupiter Money support
+5. Keep responses concise and culturally appropriate
+6. Focus on general financial wellness and banking concepts
+7. Avoid giving specific financial advice without proper context
+
+Provide a helpful general response:"""
+
+    def _detect_language(self, query: str) -> str:
+        """Simple language detection"""
+        # Basic check for Hindi characters
+        if any("\u0900" <= char <= "\u097f" for char in query):
+            return "Hindi/English"
+        return "English"
+
+    def _create_error_response(self, query: str, error_message: str) -> dict[str, Any]:
+        """Create error response"""
+        return {
+            "answer": "I apologize, but I'm experiencing technical difficulties. Please try again or contact Jupiter Money support.",
+            "confidence": 0.0,
+            "source_documents": [],
+            "metadata": {
+                "query": query,
+                "error": error_message,
+                "generation_method": "error",
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        }
+
+    def get_generation_stats(self) -> dict[str, Any]:
+        """Get response generation statistics"""
+        return {
+            "generator_version": "2.0.0",
+            "features": ["groq_primary", "distilbert_fallback", "semantic_retrieval"],
+            "model_priority": ["Groq Llama-3.3-70B", "DistilBERT Q&A", "Direct Match"],
+            "supported_languages": ["English", "Hindi", "Hinglish"],
+            "llm_status": self.llm_manager.get_model_info(),
+        }
 
     def health_check(self) -> bool:
-        """Check if response generation system is working"""
+        """Check if response generator is working"""
         try:
-            test_result = self.generate_response("test query")
-            return len(test_result.response) > 0
+            # Test basic response generation
+            test_response = self.generate_response("test", max_tokens=10)
+            return test_response.get("answer", "") != ""
         except Exception as e:
             log.error(f"Response generator health check failed: {e}")
             return False

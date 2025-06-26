@@ -1,432 +1,208 @@
 """
 Retriever for Jupiter FAQ Bot
-
-Handles document retrieval and ranking for RAG:
-- Semantic search using ChromaDB
-- Result reranking and filtering
-- Context preparation for LLM
+Production-ready retrieval without hardcoded patterns.
 """
 
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
-from loguru import logger as log
+from src.database.chroma_client import ChromaClient
+from src.database.data_models import CategoryEnum, FAQDocument, QueryResult
+from src.utils.logger import get_logger
 
-from config.settings import settings
-from src.database.chroma_client import ChromaDBClient
-from src.database.data_models import CategoryEnum, LanguageEnum
-
-
-@dataclass
-class RetrievedDocument:
-    """Structure for retrieved document with metadata"""
-
-    id: str
-    question: str
-    answer: str
-    category: str
-    source_url: str
-    similarity_score: float
-    confidence_score: float
-    rank: int = 0
-    relevance_score: float = 0.0
-
-
-@dataclass
-class RetrievalResult:
-    """Complete retrieval result with context"""
-
-    query: str
-    documents: list[RetrievedDocument]
-    total_found: int
-    retrieval_time_ms: int
-    language: LanguageEnum
-    suggested_category: str | None = None
-    context_text: str = ""
+log = get_logger(__name__)
 
 
 class Retriever:
-    """Handles document retrieval and ranking for RAG pipeline"""
+    """Retrieves relevant FAQ documents using semantic search"""
 
-    def __init__(self):
-        self.chroma_client = ChromaDBClient()
-        self.similarity_threshold = settings.model.similarity_threshold
-        self.top_k = settings.model.top_k_results
+    def __init__(self, chroma_client: ChromaClient):
+        """Initialize retriever with database client"""
+        self.chroma_client = chroma_client
 
-        log.info("Retriever initialized")
-
-    def retrieve(
+    def search(
         self,
         query: str,
-        language: LanguageEnum = None,
-        category_filter: str = None,
-        top_k: int = None,
-        similarity_threshold: float = None,
-    ) -> RetrievalResult:
+        top_k: int = 5,
+        similarity_threshold: float = 0.4,
+        category_filter: CategoryEnum | None = None,
+    ) -> QueryResult:
         """
-        Retrieve relevant documents for a query
+        Search for relevant FAQ documents
 
         Args:
-            query: User query text
-            language: Query language for filtering
-            category_filter: Category to filter results
-            top_k: Number of documents to retrieve
+            query: User query
+            top_k: Number of results to return
             similarity_threshold: Minimum similarity score
+            category_filter: Optional category to filter by
 
         Returns:
-            RetrievalResult with ranked documents and context
+            QueryResult with matched documents and metadata
         """
-        start_time = datetime.now()
-
-        # Use defaults if not provided
-        if top_k is None:
-            top_k = self.top_k
-        if similarity_threshold is None:
-            similarity_threshold = self.similarity_threshold
-
         try:
-            # Detect language if not provided
-            if language is None:
-                language = self._detect_language(query)
+            log.info(f"Searching for: '{query}' (top_k={top_k}, threshold={similarity_threshold})")
 
-            # Suggest category based on query
-            suggested_category = self._suggest_category(query)
+            # Clean query
+            cleaned_query = self._clean_query(query)
+            if not cleaned_query:
+                return QueryResult(
+                    query=query,
+                    matched_documents=[],
+                    total_matches=0,
+                    confidence=0.0,
+                    search_metadata={
+                        "cleaned_query": "",
+                        "filters_applied": [],
+                        "error": "Empty query after cleaning",
+                    },
+                )
 
-            # Use suggested category if no filter provided
-            if category_filter is None and suggested_category:
-                category_filter = suggested_category
+            # Prepare search filters
+            filters = self._prepare_filters(category_filter)
 
-            # Search ChromaDB
-            search_results = self.chroma_client.search_similar(
-                query=query,
-                n_results=top_k * 2,  # Get more to allow for filtering
-                category_filter=category_filter,
+            # Search using ChromaDB
+            results = self.chroma_client.search(
+                query=cleaned_query,
+                top_k=top_k,
+                similarity_threshold=similarity_threshold,
+                filters=filters,
             )
 
-            # Convert to RetrievedDocument objects
-            documents = []
-            for i, result in enumerate(search_results["results"]):
-                if result["similarity_score"] >= similarity_threshold:
-                    doc = RetrievedDocument(
-                        id=result["id"],
-                        question=result["question"],
-                        answer=result["answer"],
-                        category=result["category"],
-                        source_url=result["source_url"],
-                        similarity_score=result["similarity_score"],
-                        confidence_score=result["confidence_score"],
-                        rank=i + 1,
-                    )
-                    documents.append(doc)
+            if not results:
+                return QueryResult(
+                    query=query,
+                    matched_documents=[],
+                    total_matches=0,
+                    confidence=0.0,
+                    search_metadata={
+                        "cleaned_query": cleaned_query,
+                        "filters_applied": list(filters.keys()) if filters else [],
+                        "message": "No results found",
+                    },
+                )
 
-            # Rerank documents
-            documents = self._rerank_documents(query, documents)
+            # Convert to FAQDocument objects
+            matched_docs = self._convert_results_to_faq_docs(results)
 
-            # Take only top_k after reranking
-            documents = documents[:top_k]
+            # Calculate overall confidence
+            confidence = self._calculate_retrieval_confidence(results, similarity_threshold)
 
-            # Generate context text
-            context_text = self._generate_context(documents)
-
-            # Calculate retrieval time
-            end_time = datetime.now()
-            retrieval_time_ms = int((end_time - start_time).total_seconds() * 1000)
-
-            result = RetrievalResult(
+            return QueryResult(
                 query=query,
-                documents=documents,
-                total_found=len(documents),
-                retrieval_time_ms=retrieval_time_ms,
-                language=language,
-                suggested_category=suggested_category,
-                context_text=context_text,
+                matched_documents=matched_docs,
+                total_matches=len(matched_docs),
+                confidence=confidence,
+                search_metadata={
+                    "cleaned_query": cleaned_query,
+                    "filters_applied": list(filters.keys()) if filters else [],
+                    "avg_similarity": sum(r["distance"] for r in results) / len(results),
+                    "max_similarity": max(r["distance"] for r in results),
+                },
             )
-
-            log.info(f"Retrieved {len(documents)} documents for query: {query[:50]}...")
-            return result
 
         except Exception as e:
-            log.error(f"Error during retrieval: {e}")
-            return RetrievalResult(
+            log.error(f"Search failed: {e}")
+            return QueryResult(
                 query=query,
-                documents=[],
-                total_found=0,
-                retrieval_time_ms=0,
-                language=language or LanguageEnum.ENGLISH,
-                suggested_category=None,
-                context_text="",
+                matched_documents=[],
+                total_matches=0,
+                confidence=0.0,
+                search_metadata={"error": str(e), "search_failed": True},
             )
 
-    def _detect_language(self, query: str) -> LanguageEnum:
-        """Detect query language"""
-        import re
-
-        # Simple language detection
-        hindi_patterns = [
-            r"[\u0900-\u097F]",  # Devanagari script
-            r"\b(kya|hai|kaise|kahan|kab|kyun|mera|mujhe|karna|chahiye)\b",
-            r"\b(paisa|bank|account|card|payment|transfer)\b.*\b(kaise|kya|hai)\b",
-        ]
-
-        english_words = len(re.findall(r"\b[a-zA-Z]+\b", query))
-        hindi_indicators = sum(1 for pattern in hindi_patterns if re.search(pattern, query.lower()))
-
-        if hindi_indicators > 0 and english_words > 0:
-            return LanguageEnum.HINGLISH
-        elif hindi_indicators > 0:
-            return LanguageEnum.HINDI
-        else:
-            return LanguageEnum.ENGLISH
-
-    def _suggest_category(self, query: str) -> str | None:
-        """Suggest most relevant category based on query keywords"""
-        query_lower = query.lower()
-
-        # Category keyword mappings
-        category_keywords = {
-            CategoryEnum.CARDS: [
-                "card",
-                "credit",
-                "debit",
-                "pin",
-                "cvv",
-                "edge",
-                "rupay",
-                "visa",
-                "block",
-                "unblock",
-                "activate",
-                "limit",
-                "statement",
-                "bill",
-            ],
-            CategoryEnum.PAYMENTS: [
-                "payment",
-                "pay",
-                "upi",
-                "transfer",
-                "send",
-                "money",
-                "transaction",
-                "qr",
-                "scan",
-                "bill",
-                "recharge",
-                "merchant",
-                "refund",
-            ],
-            CategoryEnum.ACCOUNTS: [
-                "account",
-                "balance",
-                "savings",
-                "salary",
-                "corporate",
-                "pots",
-                "open",
-                "close",
-                "statement",
-                "passbook",
-                "dormant",
-            ],
-            CategoryEnum.INVESTMENTS: [
-                "invest",
-                "mutual",
-                "fund",
-                "sip",
-                "portfolio",
-                "returns",
-                "gold",
-                "digifold",
-                "fd",
-                "fixed",
-                "deposit",
-                "rd",
-                "recurring",
-            ],
-            CategoryEnum.LOANS: [
-                "loan",
-                "personal",
-                "borrow",
-                "emi",
-                "interest",
-                "credit",
-                "eligibility",
-                "apply",
-                "repay",
-                "tenure",
-                "amount",
-            ],
-            CategoryEnum.REWARDS: [
-                "reward",
-                "points",
-                "cashback",
-                "offer",
-                "benefit",
-                "loyalty",
-                "redeem",
-                "program",
-                "bonus",
-                "scratch",
-            ],
-            CategoryEnum.KYC: [
-                "kyc",
-                "verification",
-                "document",
-                "aadhaar",
-                "pan",
-                "identity",
-                "verify",
-                "upload",
-                "selfie",
-                "compliance",
-            ],
-            CategoryEnum.TRACK: [
-                "track",
-                "expense",
-                "budget",
-                "spending",
-                "category",
-                "insight",
-                "analysis",
-                "report",
-                "summary",
-                "breakdown",
-            ],
-            CategoryEnum.TECHNICAL: [
-                "app",
-                "login",
-                "password",
-                "otp",
-                "error",
-                "bug",
-                "issue",
-                "update",
-                "notification",
-                "sync",
-                "backup",
-            ],
-        }
-
-        # Score each category
-        category_scores = {}
-        for category, keywords in category_keywords.items():
-            score = sum(1 for keyword in keywords if keyword in query_lower)
-            if score > 0:
-                category_scores[category] = score
-
-        # Return category with highest score
-        if category_scores:
-            best_category = max(category_scores, key=category_scores.get)
-            return best_category.value
-
-        return None
-
-    def _rerank_documents(
-        self, query: str, documents: list[RetrievedDocument]
-    ) -> list[RetrievedDocument]:
-        """Rerank documents based on additional relevance signals"""
-
-        for doc in documents:
-            relevance_score = self._calculate_relevance_score(query, doc)
-            doc.relevance_score = relevance_score
-
-        # Sort by combined score (similarity + relevance + confidence)
-        def combined_score(doc: RetrievedDocument) -> float:
-            return (
-                doc.similarity_score * 0.5 + doc.relevance_score * 0.3 + doc.confidence_score * 0.2
-            )
-
-        # Sort in descending order
-        documents.sort(key=combined_score, reverse=True)
-
-        # Update ranks
-        for i, doc in enumerate(documents):
-            doc.rank = i + 1
-
-        return documents
-
-    def _calculate_relevance_score(self, query: str, doc: RetrievedDocument) -> float:
-        """Calculate additional relevance score based on content analysis"""
-        score = 0.0
-        query_lower = query.lower()
-        question_lower = doc.question.lower()
-        answer_lower = doc.answer.lower()
-
-        # Exact keyword matches in question (higher weight)
-        query_words = set(query_lower.split())
-        question_words = set(question_lower.split())
-        answer_words = set(answer_lower.split())
-
-        # Question keyword overlap
-        question_overlap = (
-            len(query_words & question_words) / len(query_words) if query_words else 0
-        )
-        score += question_overlap * 0.4
-
-        # Answer keyword overlap
-        answer_overlap = len(query_words & answer_words) / len(query_words) if query_words else 0
-        score += answer_overlap * 0.2
-
-        # Question length preference (moderate length questions often better)
-        question_length = len(doc.question.split())
-        if 5 <= question_length <= 15:
-            score += 0.1
-
-        # Answer completeness (longer answers often more helpful)
-        answer_length = len(doc.answer.split())
-        if answer_length >= 20:
-            score += 0.1
-        elif answer_length >= 10:
-            score += 0.05
-
-        # Source confidence boost
-        score += doc.confidence_score * 0.2
-
-        return min(score, 1.0)  # Cap at 1.0
-
-    def _generate_context(self, documents: list[RetrievedDocument]) -> str:
-        """Generate formatted context text for LLM prompt"""
-        if not documents:
+    def _clean_query(self, query: str) -> str:
+        """Clean and normalize the query"""
+        if not query:
             return ""
 
-        context_parts = []
-        context_parts.append(
-            "Based on the following relevant information from Jupiter's help center:"
-        )
-        context_parts.append("")
+        # Basic cleaning
+        cleaned = query.strip()
 
-        for i, doc in enumerate(documents, 1):
-            context_parts.append(f"[Context {i}]")
-            context_parts.append(f"Q: {doc.question}")
-            context_parts.append(f"A: {doc.answer}")
-            context_parts.append(f"Category: {doc.category.title()}")
-            context_parts.append("")
+        # Remove extra whitespace
+        cleaned = " ".join(cleaned.split())
 
-        return "\n".join(context_parts)
+        return cleaned
+
+    def _prepare_filters(self, category_filter: CategoryEnum | None) -> dict[str, Any]:
+        """Prepare search filters"""
+        filters = {}
+
+        if category_filter:
+            filters["category"] = category_filter.value
+
+        return filters
+
+    def _convert_results_to_faq_docs(self, results: list[dict]) -> list[FAQDocument]:
+        """Convert search results to FAQDocument objects"""
+        faq_docs = []
+
+        for result in results:
+            try:
+                metadata = result.get("metadata", {})
+
+                # Create FAQDocument from result
+                from src.database.data_models import FAQMetadata, SourceTypeEnum
+                
+                faq_metadata = FAQMetadata(
+                    source_url=metadata.get("source_url", ""),
+                    source_type=SourceTypeEnum(metadata.get("source_type", SourceTypeEnum.UNKNOWN.value)),
+                    confidence_score=metadata.get("confidence_score", 0.0)
+                )
+                
+                faq_doc = FAQDocument(
+                    question=metadata.get("question", ""),
+                    answer=metadata.get("answer", ""),
+                    category=CategoryEnum(metadata.get("category", CategoryEnum.GENERAL.value)),
+                    metadata=faq_metadata
+                )
+                
+                # Store similarity score separately for access later
+                faq_doc.similarity_score = result.get("distance", 0.0)
+
+                faq_docs.append(faq_doc)
+
+            except Exception as e:
+                log.warning(f"Failed to convert result to FAQDocument: {e}")
+                continue
+
+        return faq_docs
+
+    def _calculate_retrieval_confidence(self, results: list[dict], threshold: float) -> float:
+        """Calculate overall confidence for the retrieval"""
+        if not results:
+            return 0.0
+
+        # Base confidence on top result similarity
+        top_similarity = results[0].get("distance", 0.0)
+
+        # Normalize to 0-1 scale
+        confidence = min(max(top_similarity - threshold, 0.0) / (1.0 - threshold), 1.0)
+
+        # Boost if we have multiple good results
+        good_results = sum(1 for r in results if r.get("distance", 0.0) >= threshold)
+        if good_results > 1:
+            confidence = min(confidence * 1.1, 1.0)
+
+        return confidence
 
     def get_retrieval_stats(self) -> dict[str, Any]:
         """Get retrieval statistics"""
         try:
-            chroma_stats = self.chroma_client.get_collection_stats()
+            stats = self.chroma_client.get_collection_stats()
             return {
-                "total_documents": chroma_stats.get("total_documents", 0),
-                "categories": chroma_stats.get("categories", []),
-                "languages": chroma_stats.get("languages", []),
-                "similarity_threshold": self.similarity_threshold,
-                "top_k": self.top_k,
-                "collection_name": chroma_stats.get("collection_name", "unknown"),
+                "collection_stats": stats,
+                "retriever_version": "2.0.0",
+                "features": ["semantic_search", "category_filtering", "confidence_scoring"],
             }
         except Exception as e:
-            log.error(f"Error getting retrieval stats: {e}")
+            log.error(f"Failed to get stats: {e}")
             return {"error": str(e)}
 
     def health_check(self) -> bool:
-        """Check if retrieval system is working"""
+        """Check if retriever is working properly"""
         try:
-            # Test basic retrieval
-            result = self.retrieve("test query", top_k=1)
-            return result.total_found >= 0  # Should return at least empty result
+            # Try a simple search
+            test_result = self.search("test", top_k=1)
+            return test_result is not None
         except Exception as e:
-            log.error(f"Retrieval health check failed: {e}")
+            log.error(f"Retriever health check failed: {e}")
             return False

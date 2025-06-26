@@ -2,14 +2,16 @@
 Configuration settings for Jupiter FAQ Bot
 """
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-# Load environment variables
-load_dotenv()
+env_file = Path(".env")
+if env_file.exists():
+    load_dotenv(env_file)
 
 
 class DatabaseConfig(BaseSettings):
@@ -26,9 +28,9 @@ class ModelConfig(BaseSettings):
     embedding_model: str = Field(
         default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", env="EMBEDDING_MODEL"
     )
-    llm_model: str = Field(default="Qwen/Qwen2.5-1.5B-Instruct", env="LLM_MODEL")
+    llm_model: str = Field(default="llama-3.3-70b-versatile", env="LLM_MODEL")
     max_context_length: int = Field(default=2048, env="MAX_CONTEXT_LENGTH")
-    similarity_threshold: float = Field(default=0.5, env="SIMILARITY_THRESHOLD")
+    similarity_threshold: float = Field(default=0.4, env="SIMILARITY_THRESHOLD")
     top_k_results: int = Field(default=5, env="TOP_K_RESULTS")
     confidence_threshold: float = Field(default=0.8, env="CONFIDENCE_THRESHOLD")
 
@@ -67,6 +69,7 @@ class APIConfig(BaseSettings):
 
     huggingface_api_token: str | None = Field(default=None, env="HUGGINGFACE_API_TOKEN")
     openai_api_key: str | None = Field(default=None, env="OPENAI_API_KEY")
+    groq_api_key: str | None = Field(default=os.getenv("GROQ_API_KEY"), env="GROQ_API_KEY")
 
 
 class Settings:
