@@ -53,6 +53,8 @@ class SourceTypeEnum(str, Enum):
     HELP_CENTER = "help_center"
     COMMUNITY = "community"
     BLOG = "blog"
+    FAQ = "faq"
+    UNKNOWN = "unknown"
 
 
 class FAQMetadata(BaseModel):
@@ -78,6 +80,7 @@ class FAQDocument(BaseModel):
     language: LanguageEnum = LanguageEnum.ENGLISH
     embeddings: list[float] | None = None
     metadata: FAQMetadata
+    similarity_score: float | None = None
 
     class Config:
         use_enum_values = True
@@ -163,3 +166,13 @@ class ScrapedContent(BaseModel):
     source_type: SourceTypeEnum
     scraped_at: datetime = Field(default_factory=datetime.now)
     processing_status: str = "pending"  # "pending", "processed", "failed"
+
+
+class QueryResult(BaseModel):
+    """Result from document retrieval query"""
+
+    query: str
+    matched_documents: list[FAQDocument] = Field(default_factory=list)
+    total_matches: int = 0
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    search_metadata: dict = Field(default_factory=dict)

@@ -16,7 +16,7 @@ from src.utils.logger import get_logger
 log = get_logger(__name__)
 
 
-class ChromaDBClient:
+class ChromaClient:
     """Client for managing ChromaDB vector database operations"""
 
     def __init__(self):
@@ -117,75 +117,51 @@ class ChromaDBClient:
             log.error(f"Failed to add documents to ChromaDB: {e}")
             return False
 
-    def search_similar(
-        self, query: str, n_results: int = None, category_filter: str = None
-    ) -> dict[str, Any]:
+    def search(
+        self, query: str, top_k: int = 5, similarity_threshold: float = 0.4, filters: dict = None
+    ) -> list[dict]:
         """Search for similar documents in ChromaDB"""
         try:
-            if n_results is None:
-                n_results = settings.model.top_k_results
-
             # Generate embedding for query
             query_embedding = self.generate_embeddings([query])[0]
 
             # Prepare where clause for filtering
             where_clause = {}
-            if category_filter:
-                where_clause["category"] = category_filter
+            if filters:
+                where_clause.update(filters)
 
             # Search in ChromaDB
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=n_results,
+                n_results=top_k,
                 where=where_clause if where_clause else None,
                 include=["documents", "metadatas", "distances"],
             )
 
-            # Format results
-            formatted_results = {
-                "query": query,
-                "results": [],
-                "total_found": len(results["ids"][0]) if results["ids"] else 0,
-            }
+            # Format results for the new interface
+            formatted_results = []
 
             if results["ids"] and results["ids"][0]:
                 for i in range(len(results["ids"][0])):
                     distance = results["distances"][0][i]
-                    # ChromaDB uses squared L2 distance. Minimum distance ~9.2 for identical text
-                    # Convert to normalized similarity score (0-1 range with intuitive meaning)
+                    
+                    # Convert distance to similarity score (0-1 range)
                     import math
-
-                    # Normalize using the empirically observed range:
-                    # - Min distance (identical): ~9.2 → ~0.95+ similarity
-                    # - Good match: ~20 → ~0.70+ similarity
-                    # - Decent match: ~30 → ~0.50+ similarity
-                    # - Poor match: ~40+ → <0.30 similarity
-
-                    # Formula: similarity = max(0, (max_dist - dist) / (max_dist - min_dist))
-                    # With sigmoid adjustment for better distribution
-                    min_distance = 9.0  # Theoretical minimum (very close to identical)
-                    max_distance = 45.0  # Beyond this = irrelevant
-
-                    # Linear normalization with sigmoid smoothing
+                    min_distance = 9.0  
+                    max_distance = 45.0  
                     linear_sim = max(0.0, (max_distance - distance) / (max_distance - min_distance))
-                    # Apply sigmoid to make the scale more intuitive
                     similarity_score = 1.0 / (1.0 + math.exp(-6 * (linear_sim - 0.5)))
 
-                    result = {
-                        "id": results["ids"][0][i],
-                        "question": results["metadatas"][0][i]["question"],
-                        "answer": results["metadatas"][0][i]["answer"],
-                        "category": results["metadatas"][0][i]["category"],
-                        "source_url": results["metadatas"][0][i]["source_url"],
-                        "similarity_score": similarity_score,
-                        "distance": distance,  # Also include raw distance for debugging
-                        "confidence_score": results["metadatas"][0][i].get("confidence_score", 0.0),
-                    }
-                    formatted_results["results"].append(result)
+                    # Only include results above threshold
+                    if similarity_score >= similarity_threshold:
+                        result = {
+                            "id": results["ids"][0][i],
+                            "distance": similarity_score,  # Use similarity score as distance
+                            "metadata": results["metadatas"][0][i]
+                        }
+                        formatted_results.append(result)
 
-            log.info(
-                f"Found {formatted_results['total_found']} similar documents for query: {query[:50]}..."
-            )
+            log.info(f"Found {len(formatted_results)} documents above threshold for: {query[:50]}...")
             return formatted_results
 
         except Exception as e:
