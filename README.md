@@ -1,4 +1,4 @@
-# 🚀 Jupiter FAQ Bot - Production-Ready AI Assistant
+# 🚀 Jupiter AI Assistant
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://jupiter-faq-bot.streamlit.app)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -20,7 +20,7 @@ A production-ready, multilingual AI-powered FAQ bot for Jupiter Money that deliv
 - **Real-time Analytics**: Performance monitoring and usage insights
 - **Error Handling**: Robust retry logic with exponential backoff
 
-### 🎨 **Beautiful Streamlit UI**
+### 🎨 ** Streamlit UI**
 - **Interactive Chat Interface**: Real-time conversations with message history
 - **Analytics Dashboard**: Performance metrics with interactive Plotly charts
 - **Admin Panel**: System health monitoring and data management
@@ -196,11 +196,6 @@ MODELS = {
 - 📊 **Interactive Charts**: Plotly visualizations
 - 🔄 **Real-time Updates**: Live system monitoring
 
-### **Admin Panel**
-- 🏥 **Health Checks**: System status, API connectivity
-- 📄 **Data Management**: Document statistics, database info
-- 🔍 **Search Testing**: Query the knowledge base
-- 🌍 **Environment Monitoring**: System resources, logs
 
 ## 🧪 Testing & Quality Assurance
 
@@ -227,12 +222,6 @@ python test_setup.py
 - Query pattern analysis
 - System health indicators
 
-### **Logging**
-- **Console**: Colored development logs
-- **Files**: Rotating logs with compression
-- **Errors**: Dedicated error tracking
-- **Analytics**: Performance metrics
-
 ## 🔐 Security & Compliance
 
 - **API Key Management**: Secure environment variable handling
@@ -256,11 +245,6 @@ docker build -t jupiter-faq-bot .
 docker run -p 8501:8501 --env-file .env jupiter-faq-bot
 ```
 
-### **3. Cloud Platforms**
-- **AWS**: ECS, Elastic Beanstalk
-- **GCP**: Cloud Run, App Engine
-- **Azure**: Container Instances, App Service
-- **Heroku**: Direct git deployment
 
 ## 🚨 Troubleshooting
 
@@ -302,9 +286,6 @@ export TOKENIZERS_PARALLELISM=false
 4. **Push** to branch (`git push origin feature/enhancement`)
 5. **Create** Pull Request
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
@@ -328,6 +309,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **🚀 Live Demo**: [Jupiter FAQ Bot](https://jupiter-faq-bot.streamlit.app)
 
----
-
-*Built with ❤️ for Jupiter Money's financial wellness community*
