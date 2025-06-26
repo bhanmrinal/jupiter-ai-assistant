@@ -701,7 +701,7 @@ class JupiterFAQApp:
                                 st.session_state.suggestion_clicked = suggestion
                                 st.rerun()
                                 
-        except Exception as e:
+        except Exception:
             # Show fallback suggestions
             fallback_suggestions = [
                 "How can I contact Jupiter support?",

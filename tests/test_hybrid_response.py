@@ -12,7 +12,6 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.database.data_models import LanguageEnum
 from src.models.llm_manager import LLMManager
 from src.models.response_generator import ResponseGenerator
 from src.utils.logger import get_logger

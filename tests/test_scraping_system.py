@@ -11,7 +11,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from src.data_processing.processor import DataProcessor
-from src.database.chroma_client import ChromaDBClient
+from src.database.chroma_client import ChromaClient
 from src.scraper.blog_scraper import BlogScraper
 from src.scraper.community_scraper import CommunityScraper
 from src.scraper.jupiter_scraper import JupiterScraper
@@ -120,7 +120,7 @@ def test_chromadb():
     print("\n💾 Testing ChromaDB...")
 
     try:
-        chroma_client = ChromaDBClient()
+        chroma_client = ChromaClient()
 
         # Health check
         if chroma_client.health_check():

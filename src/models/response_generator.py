@@ -109,7 +109,11 @@ class ResponseGenerator:
             return self._create_error_response(query, str(e))
 
     def _generate_contextual_response(
-        self, query: str, retrieval_result: QueryResult, max_tokens: int, preferred_model: str = None
+        self, 
+        query: str, 
+        retrieval_result: QueryResult, 
+        max_tokens: int, 
+        preferred_model: str = None
     ) -> dict[str, Any]:
         """Generate response using retrieved context with enhanced error handling and language consistency"""
         try:
@@ -483,46 +487,98 @@ Be understanding, professional, and maintain Jupiter team identity even during t
         return "\n".join(context_parts)
 
     def _detect_language(self, text: str) -> str:
-        """Simple language detection"""
-        # Check for Hindi/Devanagari characters
+        """Enhanced language detection with better accuracy"""
         import re
+        
+        # Check for Hindi/Devanagari characters first
         hindi_chars = re.findall(r"[\u0900-\u097F]", text)
         if hindi_chars:
             return "hindi"
         
-        # Check for common Hindi/Hinglish words
-        hinglish_words = ["kya", "hai", "hota", "kaise", "mein", "aur", "ka", "ki", "se", "ko"]
-        if any(word in text.lower() for word in hinglish_words):
+        # More comprehensive Hinglish word detection
+        hinglish_words = [
+            "kya", "hai", "hota", "kaise", "mein", "aur", "ka", "ki", "se", "ko", 
+            "karo", "kare", "kar", "ho", "haan", "nahi", "nahin", "toh", "phir",
+            "abhi", "waha", "yaha", "kahan", "kab", "kyun", "kyunki", "lekin",
+            "par", "ke", "me", "main", "hun", "hu", "hoon", "batao", "bataye",
+            "chahiye", "chaahiye", "zarurat", "paisa", "paise", "rupaye", "rupee"
+        ]
+        
+        # Convert text to lowercase for checking
+        text_lower = text.lower()
+        
+        # Split into words to check exact matches (not substrings)
+        words = re.findall(r'\b\w+\b', text_lower)
+        
+        # Count Hinglish words
+        hinglish_count = sum(1 for word in words if word in hinglish_words)
+        
+        # If at least 2 Hinglish words or more than 30% of words are Hinglish
+        if hinglish_count >= 2 or (len(words) > 0 and hinglish_count / len(words) > 0.3):
             return "hinglish"
         
+        # Single Hinglish word might still be Hinglish if it's a key indicator
+        key_hinglish_indicators = ["kya", "kaise", "karo", "batao", "chahiye"]
+        if any(word in words for word in key_hinglish_indicators):
+            return "hinglish"
+            
+        # Default to English if no clear Hinglish indicators
         return "english"
 
     def _predict_category(self, query: str) -> str:
-        """Simple category prediction based on keywords"""
-        query_lower = query.lower()
-        
-        if any(word in query_lower for word in ["card", "debit", "credit", "swipe"]):
-            return "cards"
-        elif any(word in query_lower for word in ["payment", "upi", "transfer", "send"]):
-            return "payments"
-        elif any(word in query_lower for word in ["account", "balance", "statement"]):
-            return "accounts"
-        elif any(word in query_lower for word in ["invest", "gold", "mutual", "fund"]):
-            return "investments"
-        elif any(word in query_lower for word in ["loan", "borrow", "emi"]):
-            return "loans"
-        elif any(word in query_lower for word in ["reward", "point", "cashback"]):
-            return "rewards"
-        elif any(word in query_lower for word in ["kyc", "verification", "document"]):
-            return "kyc"
-        elif any(word in query_lower for word in ["app", "login", "error", "problem"]):
-            return "technical"
-        else:
+        """LLM-powered category prediction instead of keyword matching"""
+        try:
+            if not self.llm_manager.conversation_loaded:
+                return "general"
+            
+            category_prompt = f"""You are a Jupiter Money categorization expert. Analyze this user query and identify the most relevant Jupiter service category.
+
+User Query: "{query}"
+
+Categories:
+- cards: Debit cards, credit cards, card management, limits, PIN, blocking/unblocking
+- payments: UPI, transfers, bill payments, money sending, payment issues
+- accounts: Account opening, balance, statements, account management
+- investments: Gold, mutual funds, investment options, portfolio
+- loans: Personal loans, EMI, loan applications, eligibility
+- rewards: Cashback, reward points, offers, benefits
+- kyc: Verification, documents, compliance, identity proof
+- technical: App issues, login problems, technical support
+- general: Basic questions, general inquiries, company info
+
+Rules:
+1. Choose the SINGLE most relevant category
+2. Base decision on the main intent of the query
+3. If unclear, choose "general"
+4. Respond with only the category name (lowercase)
+
+Analyze the query and respond with just the category name."""
+
+            best_model = self.llm_manager.get_best_groq_model(len(query), "simple")
+            if best_model:
+                category_response, _ = self.llm_manager.generate_conversation(
+                    system_prompt=category_prompt,
+                    user_query=f"Categorize: {query}",
+                    max_tokens=10
+                )
+                
+                if category_response:
+                    predicted_category = category_response.strip().lower()
+                    # Validate it's a known category
+                    valid_categories = ["cards", "payments", "accounts", "investments", "loans", "rewards", "kyc", "technical", "general"]
+                    if predicted_category in valid_categories:
+                        return predicted_category
+            
+            return "general"
+            
+        except Exception as e:
+            log.warning(f"LLM category prediction failed: {e}")
             return "general"
 
     def generate_follow_up_question(self, query: str, context_summary: str = "") -> str:
         """Generate a follow-up question using enhanced template"""
         try:
+            # Use LLM for category prediction instead of hard-coded logic
             category = self._predict_category(query)
             language = self._detect_language(query)
             
@@ -647,38 +703,35 @@ Be empathetic and professional."""
             return False
 
     def generate_related_suggestions(self, query: str, context_documents: list = None, user_history: list = None) -> list[str]:
-        """Generate related query suggestions based on current query and user behavior"""
+        """Generate related query suggestions completely powered by LLM"""
         try:
-            suggestions = []
-            
-            # Get category and base suggestions
+            # Use LLM for category prediction
             category = self._predict_category(query)
             language = self._detect_language(query)
             
-            # Category-based suggestions
-            base_suggestions = self._get_category_suggestions(category, language)
-            suggestions.extend(base_suggestions[:2])
+            # Generate all suggestions using LLM
+            suggestions = []
             
-            # Context-based suggestions from related documents
-            if context_documents:
-                context_suggestions = self._extract_context_suggestions(context_documents, query)
-                suggestions.extend(context_suggestions[:2])
-            
-            # User behavior-based suggestions
-            if user_history:
-                behavioral_suggestions = self._generate_behavioral_suggestions(user_history, query)
-                suggestions.extend(behavioral_suggestions[:1])
-                
-            # Use LLM to generate intelligent suggestions
+            # Primary LLM-powered suggestions
             if self.llm_manager.conversation_loaded:
                 llm_suggestions = self._generate_llm_suggestions(query, category, language)
-                suggestions.extend(llm_suggestions[:2])
+                suggestions.extend(llm_suggestions)
             
+            # Context-based suggestions using LLM
+            if context_documents:
+                context_suggestions = self._generate_context_based_suggestions(query, context_documents, language)
+                suggestions.extend(context_suggestions)
+            
+            # History-based suggestions using LLM
+            if user_history:
+                history_suggestions = self._generate_history_based_suggestions(query, user_history, language)
+                suggestions.extend(history_suggestions)
+                
             # Remove duplicates and limit to 5 suggestions
             unique_suggestions = []
             seen = set()
             for suggestion in suggestions:
-                if suggestion.lower() not in seen and len(suggestion) > 10:
+                if suggestion and suggestion.lower() not in seen and len(suggestion) > 10:
                     unique_suggestions.append(suggestion)
                     seen.add(suggestion.lower())
                     if len(unique_suggestions) >= 5:
@@ -688,121 +741,99 @@ Be empathetic and professional."""
             
         except Exception as e:
             log.error(f"Suggestion generation failed: {e}")
-            return self._get_fallback_suggestions(category)
+            # If everything fails, return empty list (no hard-coded fallbacks)
+            return []
 
-    def _get_category_suggestions(self, category: str, language: str) -> list[str]:
-        """Generate category-based suggestions using LLM instead of hard-coded responses"""
+    def _generate_context_based_suggestions(self, query: str, context_documents: list, language: str) -> list[str]:
+        """Generate suggestions based on context documents using LLM"""
         try:
-            if not self.llm_manager.conversation_loaded:
+            if not self.llm_manager.conversation_loaded or not context_documents:
                 return []
             
-            suggestion_prompt = f"""You are a Jupiter Money team member helping users discover relevant features.
+            # Extract key topics from context documents
+            context_summary = ""
+            for doc in context_documents[:3]:
+                if isinstance(doc, dict):
+                    context_summary += f"{doc.get('question', '')} {doc.get('answer', '')} "
+                else:
+                    context_summary += f"{getattr(doc, 'question', '')} {getattr(doc, 'answer', '')} "
+            
+            context_prompt = f"""You are a Jupiter Money expert helping users discover related information.
 
-Generate 3 helpful, specific questions related to "{category}" that Jupiter customers commonly ask.
-
-Requirements:
-1. Make questions practical and actionable
-2. Focus on common Jupiter features and services
-3. Write in {language} language
-4. Keep each question under 60 characters
-5. Make them sound natural, like real customer questions
-6. Focus on Jupiter-specific capabilities
-
-Category: {category}
+User's Current Query: "{query}"
+Related Context: {context_summary[:500]}
 Language: {language}
 
-Return only the 3 questions, one per line, without numbering or extra formatting."""
+Based on the user's query and the related context, generate 2 helpful follow-up questions they might have.
 
-            best_model = self.llm_manager.get_best_groq_model(100, "simple")
-            if best_model:
-                suggestions_text, _ = self.llm_manager.generate_conversation(
-                    system_prompt=suggestion_prompt,
-                    user_query=f"Generate {category} suggestions in {language}",
-                    max_tokens=200
-                )
+Requirements:
+1. Generate exactly 2 questions
+2. Make them relevant to both the query and context
+3. Use {language} language naturally
+4. Each question under 60 characters
+5. Focus on actionable Jupiter features
+6. Don't repeat the original query
+
+Output only the 2 questions, one per line."""
+
+            response, _ = self.llm_manager.generate_conversation(
+                system_prompt=context_prompt,
+                user_query="Generate context-based suggestions",
+                max_tokens=100
+            )
+            
+            if response:
+                suggestions = [s.strip() for s in response.split('\n') if s.strip() and '?' in s]
+                return suggestions[:2]
                 
-                if suggestions_text:
-                    # Parse the response into individual suggestions
-                    suggestions = [
-                        line.strip() 
-                        for line in suggestions_text.split('\n') 
-                        if line.strip() and len(line.strip()) > 10
-                    ]
-                    return suggestions[:3]  # Limit to 3 suggestions
-            
-            return []
-            
         except Exception as e:
-            log.error(f"LLM category suggestion generation failed: {e}")
-            return []
-
-    def _extract_context_suggestions(self, documents: list, original_query: str) -> list[str]:
-        """Extract suggestions from context documents"""
-        suggestions = []
-        
-        try:
-            # Extract keywords from documents to create related questions
-            for doc in documents[:3]:
-                # Handle both dict and object formats
-                if isinstance(doc, dict):
-                    doc_content = f"{doc.get('question', '')} {doc.get('answer', '')}"
-                    question = doc.get('question', '')
-                    answer = doc.get('answer', '')
-                else:
-                    # Object with attributes
-                    doc_content = f"{getattr(doc, 'question', '')} {getattr(doc, 'answer', '')}"
-                    question = getattr(doc, 'question', '')
-                    answer = getattr(doc, 'answer', '')
-                
-                # Simple keyword extraction for suggestions
-                if "UPI" in doc_content and "UPI" not in original_query:
-                    suggestions.append("How does UPI work with Jupiter?")
-                elif "investment" in doc_content.lower() and "invest" not in original_query.lower():
-                    suggestions.append("What investment options does Jupiter provide?")
-                elif "reward" in doc_content.lower() and "reward" not in original_query.lower():
-                    suggestions.append("How to maximize rewards on Jupiter?")
-                elif "limit" in doc_content.lower() and "limit" not in original_query.lower():
-                    suggestions.append("What are the transaction limits?")
-                    
-        except Exception as e:
-            log.warning(f"Context suggestion extraction failed: {e}")
+            log.warning(f"Context-based suggestion generation failed: {e}")
             
-        return suggestions
+        return []
 
-    def _generate_behavioral_suggestions(self, user_history: list, current_query: str) -> list[str]:
-        """Generate suggestions based on user's query history"""
-        suggestions = []
-        
+    def _generate_history_based_suggestions(self, query: str, user_history: list, language: str) -> list[str]:
+        """Generate suggestions based on user history using LLM"""
         try:
-            if not user_history:
-                return suggestions
+            if not self.llm_manager.conversation_loaded or not user_history:
+                return []
                 
-            # Analyze user's past queries for patterns
+            # Get recent queries from history
             recent_queries = [h.get('query', '') for h in user_history[-5:]]
-            categories_used = [self._predict_category(q) for q in recent_queries]
+            history_text = " | ".join(recent_queries)
             
-            # Suggest unexplored categories
-            all_categories = ["cards", "payments", "accounts", "investments", "loans", "rewards", "kyc"]
-            unused_categories = [cat for cat in all_categories if cat not in categories_used]
+            history_prompt = f"""You are a Jupiter Money expert analyzing user behavior patterns.
+
+User's Current Query: "{query}"
+Recent Query History: {history_text}
+Language: {language}
+
+Based on their query history, suggest 1 helpful question that explores a different Jupiter service they haven't asked about yet.
+
+Requirements:
+1. Generate exactly 1 question
+2. Choose a different topic/service than their recent queries
+3. Use {language} language naturally  
+4. Under 60 characters
+5. Focus on Jupiter features they might find useful
+6. Make it discovery-oriented
+
+Output only the 1 question."""
+
+            response, _ = self.llm_manager.generate_conversation(
+                system_prompt=history_prompt,
+                user_query="Generate history-based suggestion",
+                max_tokens=50
+            )
             
-            if unused_categories:
-                category = unused_categories[0]
-                category_suggestions = self._get_category_suggestions(category, "english")
-                if category_suggestions:
-                    suggestions.append(category_suggestions[0])
-                    
-            # Suggest follow-up to previous queries
-            if recent_queries:
-                last_query = recent_queries[-1]
-                if "setup" in last_query.lower():
-                    suggestions.append("How to troubleshoot if setup doesn't work?")
-                elif "apply" in last_query.lower():
-                    suggestions.append("What happens after application submission?")
-                    
+            if response:
+                suggestion = response.strip()
+                if suggestion and '?' in suggestion:
+                    return [suggestion]
+                
         except Exception as e:
-            log.warning(f"Behavioral suggestion generation failed: {e}")
+            log.warning(f"History-based suggestion generation failed: {e}")
             
-        return suggestions
+        return []
 
     def _generate_llm_suggestions(self, query: str, category: str, language: str) -> list[str]:
         """Use LLM to generate intelligent, contextual suggestions"""
@@ -841,44 +872,3 @@ Examples:
             log.warning(f"LLM suggestion generation failed: {e}")
             
         return []
-
-    def _get_fallback_suggestions(self, category: str) -> list[str]:
-        """Generate fallback suggestions using LLM when other methods fail"""
-        try:
-            if not self.llm_manager.conversation_loaded:
-                return []
-            
-            fallback_prompt = f"""You are a Jupiter Money team member. Generate 2 helpful, general questions related to "{category}" that any Jupiter customer might ask.
-
-Requirements:
-1. Make them simple and commonly asked
-2. Focus on Jupiter's core services
-3. Keep each under 50 characters
-4. Use simple English
-5. Make them actionable
-
-Category: {category}
-
-Return only 2 questions, one per line, without numbering."""
-
-            best_model = self.llm_manager.get_best_groq_model(50, "simple")
-            if best_model:
-                response, _ = self.llm_manager.generate_conversation(
-                    system_prompt=fallback_prompt,
-                    user_query=f"Generate fallback suggestions for {category}",
-                    max_tokens=100
-                )
-                
-                if response:
-                    suggestions = [
-                        line.strip() 
-                        for line in response.split('\n') 
-                        if line.strip() and len(line.strip()) > 10
-                    ]
-                    return suggestions[:2]
-                    
-            return []
-            
-        except Exception as e:
-            log.warning(f"LLM fallback suggestion generation failed: {e}")
-            return []

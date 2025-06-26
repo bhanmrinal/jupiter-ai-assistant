@@ -5,20 +5,19 @@ Evaluates semantic similarity, answer relevance, and system performance.
 Provides comprehensive metrics for retrieval-based vs LLM-based approaches.
 """
 
-import os
-import time
 import logging
-from datetime import datetime
-from typing import Any, Dict, List, Tuple
-import numpy as np
+import time
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+import numpy as np
+from sentence_transformers import SentenceTransformer
 
 from src.database.chroma_client import ChromaClient
 from src.models.llm_manager import LLMManager
 from src.models.response_generator import ResponseGenerator
 from src.models.retriever import Retriever
-from src.utils.logger import get_logger
-from sentence_transformers import SentenceTransformer
 
 log = logging.getLogger(__name__)
 
@@ -47,9 +46,9 @@ class EvaluationSummary:
     avg_relevance_score: float
     avg_response_time: float
     avg_confidence: float
-    method_breakdown: Dict[str, int]
-    model_breakdown: Dict[str, int]
-    accuracy_by_category: Dict[str, float]
+    method_breakdown: dict[str, int]
+    model_breakdown: dict[str, int]
+    accuracy_by_category: dict[str, float]
 
 
 class AnswerEvaluator:
@@ -168,8 +167,8 @@ class AnswerEvaluator:
                 model_used="none"
             )
 
-    def evaluate_test_set(self, test_queries: List[Dict[str, str]], 
-                         methods: List[str] = ["auto", "retrieval_only", "llm_only"]) -> Dict[str, List[EvaluationResult]]:
+    def evaluate_test_set(self, test_queries: list[dict[str, str]], 
+                         methods: list[str] = ["auto", "retrieval_only", "llm_only"]) -> dict[str, list[EvaluationResult]]:
         """Evaluate multiple queries across different methods"""
         
         results = {method: [] for method in methods}
@@ -197,7 +196,7 @@ class AnswerEvaluator:
                     
         return results
 
-    def generate_evaluation_summary(self, results: Dict[str, List[EvaluationResult]]) -> Dict[str, EvaluationSummary]:
+    def generate_evaluation_summary(self, results: dict[str, list[EvaluationResult]]) -> dict[str, EvaluationSummary]:
         """Generate comprehensive summary of evaluation results"""
         
         summaries = {}
@@ -283,7 +282,7 @@ class AnswerEvaluator:
             log.error(f"Relevance score calculation failed: {e}")
             return 0.0
 
-    def _calculate_retrieval_accuracy(self, query: str, source_documents: List[Dict]) -> float:
+    def _calculate_retrieval_accuracy(self, query: str, source_documents: list[dict]) -> float:
         """Calculate accuracy of document retrieval"""
         if not source_documents:
             return 0.0
@@ -317,8 +316,8 @@ class AnswerEvaluator:
             return 0.0
             
         try:
-            from nltk.translate.bleu_score import sentence_bleu
             from nltk.tokenize import word_tokenize
+            from nltk.translate.bleu_score import sentence_bleu
             
             # Tokenize the sentences
             reference_tokens = [word_tokenize(reference.lower())]
@@ -332,7 +331,7 @@ class AnswerEvaluator:
             log.error(f"BLEU score calculation failed: {e}")
             return 0.0
 
-    def create_test_dataset(self) -> List[Dict[str, str]]:
+    def create_test_dataset(self) -> list[dict[str, str]]:
         """Create a test dataset from existing knowledge base"""
         test_cases = [
             {
@@ -379,7 +378,7 @@ class AnswerEvaluator:
         
         return test_cases
 
-    def run_comprehensive_evaluation(self) -> Dict[str, Any]:
+    def run_comprehensive_evaluation(self) -> dict[str, Any]:
         """Run a comprehensive evaluation of the system"""
         log.info("Starting comprehensive evaluation of Jupiter FAQ Bot")
         
@@ -406,7 +405,7 @@ class AnswerEvaluator:
         log.info("Comprehensive evaluation completed")
         return report
 
-    def _generate_recommendations(self, summaries: Dict[str, EvaluationSummary]) -> List[str]:
+    def _generate_recommendations(self, summaries: dict[str, EvaluationSummary]) -> list[str]:
         """Generate recommendations based on evaluation results"""
         recommendations = []
         
