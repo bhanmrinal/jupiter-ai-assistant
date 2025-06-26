@@ -18,7 +18,7 @@ sys.path.insert(0, str(project_root))
 
 from config.settings import settings
 from src.data_processing.processor import DataProcessor
-from src.database.chroma_client import ChromaDBClient
+from src.database.chroma_client import ChromaClient
 from src.database.data_models import FAQDocument, ScrapedContent
 from src.scraper.blog_scraper import BlogScraper
 from src.scraper.community_scraper import CommunityScraper
@@ -36,7 +36,7 @@ class ScrapingPipeline:
         self.community_scraper = CommunityScraper()
         self.blog_scraper = BlogScraper()
         self.processor = DataProcessor()
-        self.chroma_client = ChromaDBClient()
+        self.chroma_client = ChromaClient()
 
         self.scraped_data = []
         self.processed_faqs = []

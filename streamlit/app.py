@@ -447,17 +447,17 @@ class JupiterFAQApp:
                 original_groq_status = system['llm_manager'].groq_loaded
                 system['llm_manager'].groq_loaded = False
                 
-                response = system['response_generator'].generate_response(query, max_tokens=200)
+                response = system['response_generator'].generate_response(query, max_tokens=500)
                 
                 # Restore original status
                 system['llm_manager'].groq_loaded = original_groq_status
                 
             elif st.session_state.current_model == "Groq Llama-3.3-70B Only":
                 # Force Groq usage with higher confidence threshold
-                response = system['response_generator'].generate_response(query, max_tokens=200)
+                response = system['response_generator'].generate_response(query, max_tokens=500)
                 
             else:  # Auto mode or fallback
-                response = system['response_generator'].generate_response(query, max_tokens=200)
+                response = system['response_generator'].generate_response(query, max_tokens=500)
             
             return response
             
@@ -623,7 +623,7 @@ class JupiterFAQApp:
         
         with col1:
             st.markdown("### 🎛️ Response Settings")
-            max_tokens = st.slider("Max Response Length", 50, 500, 200, 25)
+            max_tokens = st.slider("Max Response Length", 50, 1000, 500, 50)
             similarity_threshold = st.slider("Search Precision", 0.1, 0.9, 0.4, 0.05)
             
         with col2:

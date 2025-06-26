@@ -109,7 +109,7 @@ class LLMManager:
             return "", 0.0
 
     def generate_conversation(
-        self, system_prompt: str, user_query: str, max_tokens: int = 150
+        self, system_prompt: str, user_query: str, max_tokens: int = 500
     ) -> tuple[str, float]:
         """Generate conversational response using Groq API with retry logic"""
         if not self.groq_loaded:

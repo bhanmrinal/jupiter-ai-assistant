@@ -200,19 +200,27 @@ class DataProcessor:
     ) -> FAQDocument | None:
         """Create FAQ document from processed content"""
         try:
+            # Truncate question and answer to fit model constraints
+            question = question[:500] if len(question) > 500 else question
+            answer = answer[:4500] if len(answer) > 4500 else answer  # Leave room for safety
+            
+            # Skip if too short after truncation
+            if len(question) < 10 or len(answer) < 20:
+                return None
+
             # Detect language
             language = self._detect_language(question, answer)
 
             # Calculate confidence score
             confidence = self._calculate_confidence_score(question, answer)
 
-            # Create metadata
+            # Create metadata with required fields
             metadata = FAQMetadata(
+                source_url=item.url,
+                source_type=item.source_type,
                 confidence_score=confidence,
-                word_count=len(f"{question} {answer}".split()),
-                language=language,
                 last_updated=datetime.utcnow(),
-                source_quality=self._assess_source_quality(item),
+                page_title=item.title,
             )
 
             # Create FAQ document
@@ -220,10 +228,8 @@ class DataProcessor:
                 question=question,
                 answer=answer,
                 category=CategoryEnum.GENERAL,  # Default, can be enhanced later
+                language=language,
                 metadata=metadata,
-                source_url=item.url,
-                source_type=item.source_type,
-                created_at=datetime.utcnow(),
             )
 
             return faq_doc
@@ -239,7 +245,7 @@ class DataProcessor:
         # Simple heuristic - check for Hindi/Devanagari characters
         hindi_chars = re.findall(r"[\u0900-\u097F]", text)
         if hindi_chars:
-            return LanguageEnum.HI
+            return LanguageEnum.HINDI
 
         # Default to English
         return LanguageEnum.ENGLISH

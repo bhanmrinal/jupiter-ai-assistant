@@ -32,7 +32,7 @@ class ResponseGenerator:
         self.llm_manager = llm_manager
         self.prompt_templates = PromptTemplates()
 
-    def generate_response(self, query: str, max_tokens: int = 200) -> dict[str, Any]:
+    def generate_response(self, query: str, max_tokens: int = 500) -> dict[str, Any]:
         """
         Generate response for user query
 

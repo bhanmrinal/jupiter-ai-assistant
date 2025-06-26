@@ -150,7 +150,7 @@ class BlogScraper(BaseScraper):
         soup = self._parse_html(response.text)
         content_data = self.extract_content(soup, url)
 
-        if not content_data.get("content"):
+        if not content_data or not content_data.get("content"):
             log.warning(f"No content extracted from {url}")
             return None
 
@@ -174,6 +174,9 @@ class BlogScraper(BaseScraper):
             "questions": [],
             "answers": [],
         }
+        
+        if not soup:
+            return content_data
 
         # Extract title
         title_selectors = [
@@ -213,12 +216,16 @@ class BlogScraper(BaseScraper):
         for selector in date_selectors:
             date_elem = soup.select_one(selector)
             if date_elem:
-                date_text = date_elem.get("datetime") or date_elem.get_text()
-                content_data["date"] = self._clean_text(date_text)
-                break
+                try:
+                    date_text = date_elem.get("datetime") or date_elem.get_text()
+                    content_data["date"] = self._clean_text(date_text)
+                    break
+                except Exception:
+                    continue
 
         # Extract main content
         content_selectors = [
+            ".post",  # Jupiter blog primary selector
             ".entry-content",
             ".post-content",
             ".article-content",
@@ -226,17 +233,42 @@ class BlogScraper(BaseScraper):
             "article .content",
             ".post-body",
             "main",
+            "article",  # Fallback for article tags
         ]
 
         main_content = ""
         for selector in content_selectors:
             content_elem = soup.select_one(selector)
             if content_elem:
-                # Remove unwanted elements
-                for unwanted in content_elem(["script", "style", "nav", "aside", ".social-share"]):
-                    unwanted.decompose()
+                # Remove unwanted elements - enhanced for Jupiter blog
+                unwanted_selectors = [
+                    "script", "style", "nav", "aside", "header", "footer",
+                    ".social-share", ".share-buttons", ".related-posts",
+                    ".navigation", ".breadcrumb", ".sidebar", ".menu",
+                    ".author-bio", ".comments", ".comment-form",
+                    ".post-navigation", ".post-meta", ".tags", ".categories",
+                    ".advertisement", ".ads", ".banner", ".popup"
+                ]
+                
+                for unwanted_selector in unwanted_selectors:
+                    for unwanted in content_elem.select(unwanted_selector):
+                        unwanted.decompose()
+                
+                # Also remove elements with specific classes/ids common in Jupiter
+                try:
+                    for elem in content_elem.find_all(True):
+                        if elem and hasattr(elem, 'get'):  # Ensure elem is valid and has get method
+                            classes = elem.get('class', []) or []
+                            id_attr = elem.get('id', '') or ''
+                            if any(cls in ['nav', 'menu', 'header', 'footer', 'sidebar'] for cls in classes) or \
+                               any(keyword in id_attr.lower() for keyword in ['nav', 'menu', 'header', 'footer']):
+                                elem.decompose()
+                except Exception:
+                    pass  # Ignore element cleanup errors
+                
                 main_content = self._clean_text(content_elem.get_text())
-                break
+                if main_content and len(main_content) > 100:  # Ensure we got substantial content
+                    break
 
         content_data["content"] = main_content
 
@@ -245,7 +277,10 @@ class BlogScraper(BaseScraper):
         content_data["tags"] = self._extract_tags(soup)
 
         # Extract Q&A patterns from blog content
-        self._extract_blog_qa(main_content, content_data)
+        try:
+            self._extract_blog_qa(main_content, content_data)
+        except Exception:
+            pass  # Ignore Q&A extraction errors
 
         return content_data
 
