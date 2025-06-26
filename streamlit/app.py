@@ -70,23 +70,37 @@ class JupiterFAQApp:
         self.apply_custom_css()
 
     def initialize_session_state(self):
-        """Initialize session state variables"""
-        if 'messages' not in st.session_state:
+        """Initialize all session state variables"""
+        if "messages" not in st.session_state:
             st.session_state.messages = []
         
-        if 'conversation_history' not in st.session_state:
+        if "conversation_history" not in st.session_state:
             st.session_state.conversation_history = []
+                    
+        if "system_initialized" not in st.session_state:
+            st.session_state.system_initialized = False
+        
+        if "system_components" not in st.session_state:
+            st.session_state.system_components = None
+        
+        if "current_model" not in st.session_state:
+            st.session_state.current_model = "Auto (Recommended)"
             
-        if 'query_analytics' not in st.session_state:
+        # Enhanced session state variables
+        if "preferred_groq_model" not in st.session_state:
+            st.session_state.preferred_groq_model = "auto"
+            
+        if "max_tokens" not in st.session_state:
+            st.session_state.max_tokens = 500
+            
+        if "show_analytics" not in st.session_state:
+            st.session_state.show_analytics = False
+            
+        # Analytics and feedback variables
+        if "query_analytics" not in st.session_state:
             st.session_state.query_analytics = []
             
-        if 'system_initialized' not in st.session_state:
-            st.session_state.system_initialized = False
-            
-        if 'current_model' not in st.session_state:
-            st.session_state.current_model = "Auto (Groq + DistilBERT)"
-            
-        if 'user_feedback' not in st.session_state:
+        if "user_feedback" not in st.session_state:
             st.session_state.user_feedback = []
 
     def apply_custom_css(self):
@@ -162,24 +176,95 @@ class JupiterFAQApp:
             st.markdown("*AI-powered customer support*")
             st.divider()
             
-            # Model Selection - simplified
-            st.markdown("### 🤖 AI Model")
-            model_options = [
-                "Auto (Recommended)",
-                "Groq Only", 
-                "DistilBERT Only"
-            ]
+            # Enhanced Model Selection
+            st.markdown("### 🤖 AI Models")
             
-            selected_model = st.selectbox(
-                "Choose Model:",
-                model_options,
-                index=0,
-                help="Auto mode uses the best available model"
+            # Get system info for model selection
+            if st.session_state.system_initialized:
+                system = st.session_state.system_components
+                model_info = system['llm_manager'].get_model_info()
+                
+                # Groq model selection
+                groq_models = model_info.get('groq_models', {})
+                if groq_models:
+                    st.markdown("**Groq Models:**")
+                    groq_options = ["Auto (Smart Selection)"] + list(groq_models.keys())
+                    
+                    selected_groq = st.selectbox(
+                        "Groq Model:",
+                        groq_options,
+                        index=0,
+                        help="Auto mode selects the best model for each query"
+                    )
+                    
+                    if selected_groq != "Auto (Smart Selection)":
+                        st.session_state.preferred_groq_model = selected_groq
+                    else:
+                        st.session_state.preferred_groq_model = "auto"
+                    
+                    # Display model details
+                    if selected_groq != "Auto (Smart Selection)":
+                        model_data = groq_models[selected_groq]
+                        st.caption(f"⚡ Speed: {model_data['speed']} | 📝 Context: {model_data['context']}")
+                        st.caption(f"🎯 Best for: {model_data['best_for']}")
+                else:
+                    st.warning("No Groq models available")
+                
+                # Fallback models info
+                hf_models = model_info.get('hf_models', {})
+                if hf_models:
+                    st.markdown("**Fallback Models:**")
+                    for model_key, model_data in hf_models.items():
+                        status = "🟢" if model_data['loaded'] else "🔴"
+                        st.caption(f"{status} {model_data['name']} ({model_data['speed']})")
+                
+                # Model status summary
+                total_groq = len(groq_models)
+                total_hf = len([m for m in hf_models.values() if m['loaded']])
+                st.info(f"📊 {total_groq} Groq + {total_hf} Local models available")
+                
+            else:
+                # Basic model selection when system not ready
+                model_options = [
+                    "Auto (Recommended)",
+                    "Fast Mode", 
+                    "Quality Mode"
+                ]
+                
+                selected_model = st.selectbox(
+                    "Choose Model:",
+                    model_options,
+                    index=0,
+                    help="Auto mode uses the best available model"
+                )
+                
+                if selected_model != st.session_state.current_model:
+                    st.session_state.current_model = selected_model
+                    st.rerun()
+            
+            # Response Settings
+            st.markdown("### ⚙️ Response Settings")
+            
+            # Max tokens slider
+            max_tokens = st.slider(
+                "Response Length:",
+                min_value=100,
+                max_value=1000,
+                value=500,
+                step=50,
+                help="Maximum tokens for response generation"
             )
+            st.session_state.max_tokens = max_tokens
             
-            if selected_model != st.session_state.current_model:
-                st.session_state.current_model = selected_model
-                st.rerun()
+            # Show guardrails info
+            with st.expander("🛡️ Safety Guardrails", expanded=False):
+                st.markdown("""
+                **Active Protections:**
+                - ✅ Anti-hallucination checks
+                - ✅ Confidence-based responses  
+                - ✅ Jupiter team identity consistency
+                - ✅ Fallback model redundancy
+                """)
             
             # Quick Stats (only if system is running)
             if st.session_state.system_initialized and st.session_state.conversation_history:
@@ -190,17 +275,64 @@ class JupiterFAQApp:
                 with col2:
                     avg_time = self.calculate_average_response_time()
                     st.metric("Avg Time", f"{avg_time:.1f}s")
+                
+                # Show model usage stats
+                if st.session_state.conversation_history:
+                    models_used = [h.get('metadata', {}).get('model_used', 'unknown') 
+                                 for h in st.session_state.conversation_history]
+                    model_counts = {}
+                    for model in models_used:
+                        model_counts[model] = model_counts.get(model, 0) + 1
+                    
+                    if model_counts:
+                        st.markdown("**Model Usage:**")
+                        for model, count in model_counts.items():
+                            st.caption(f"{model}: {count} times")
             
-            # System Status - simplified
+            # Enhanced System Status
             st.markdown("### 🔧 System Status")
             if st.session_state.system_initialized:
-                st.success("🟢 All systems online")
-            else:
-                st.warning("🟡 Initializing...")
+                system = st.session_state.system_components
+                model_info = system['llm_manager'].get_model_info()
                 
-            # Data Info - minimal
+                # Overall status
+                if model_info['status'] == 'ready':
+                    st.success("🟢 All systems operational")
+                else:
+                    st.error("🔴 System issues detected")
+                
+                # Detailed status in expander
+                with st.expander("📋 Detailed Status", expanded=False):
+                    # Groq models
+                    groq_models = model_info.get('groq_models', {})
+                    if groq_models:
+                        st.markdown("**Groq Models:**")
+                        for model_id, model_data in groq_models.items():
+                            st.text(f"✅ {model_data['name']}")
+                    
+                    # HuggingFace models  
+                    hf_models = model_info.get('hf_models', {})
+                    if hf_models:
+                        st.markdown("**Local Models:**")
+                        for model_key, model_data in hf_models.items():
+                            status = "✅" if model_data['loaded'] else "❌"
+                            st.text(f"{status} {model_data['name']}")
+                    
+                    # API status
+                    if os.getenv("GROQ_API_KEY"):
+                        st.text("✅ Groq API Key configured")
+                    else:
+                        st.text("⚠️ Groq API Key missing")
+                        
+                    st.text(f"🔧 Device: {model_info.get('device', 'unknown')}")
+                    
+            else:
+                st.warning("🟡 Initializing system...")
+                
+            # Enhanced Data Info
             st.markdown("### 📚 Knowledge Base")
-            st.info("185 Jupiter Money documents loaded")
+            st.info("1,044 Jupiter Money documents loaded")
+            st.caption("✨ 5.6x larger than before!")
             
             # Clear chat button
             st.divider()
@@ -437,27 +569,23 @@ class JupiterFAQApp:
             self.display_response_metadata(response, end_time - start_time)
 
     def generate_response(self, query: str) -> dict[str, Any]:
-        """Generate response using the selected model configuration"""
+        """Generate response using the enhanced model configuration"""
         try:
             system = st.session_state.system_components
             
-            # Configure model based on selection
-            if st.session_state.current_model == "DistilBERT Q&A Only":
-                # Disable Groq temporarily
-                original_groq_status = system['llm_manager'].groq_loaded
-                system['llm_manager'].groq_loaded = False
-                
-                response = system['response_generator'].generate_response(query, max_tokens=500)
-                
-                # Restore original status
-                system['llm_manager'].groq_loaded = original_groq_status
-                
-            elif st.session_state.current_model == "Groq Llama-3.3-70B Only":
-                # Force Groq usage with higher confidence threshold
-                response = system['response_generator'].generate_response(query, max_tokens=500)
-                
-            else:  # Auto mode or fallback
-                response = system['response_generator'].generate_response(query, max_tokens=500)
+            # Get user preferences
+            max_tokens = getattr(st.session_state, 'max_tokens', 500)
+            preferred_model = getattr(st.session_state, 'preferred_groq_model', 'auto')
+            
+            # Convert "auto" to None for the LLM manager
+            model_preference = None if preferred_model == "auto" else preferred_model
+            
+            # Generate response with enhanced options
+            response = system['response_generator'].generate_response(
+                query, 
+                max_tokens=max_tokens,
+                preferred_model=model_preference
+            )
             
             return response
             
@@ -465,29 +593,73 @@ class JupiterFAQApp:
             return {
                 "answer": f"I apologize, but I encountered an error: {str(e)}",
                 "confidence": 0.0,
-                "metadata": {"error": str(e), "generation_method": "error"}
+                "metadata": {
+                    "error": str(e), 
+                    "generation_method": "error",
+                    "model_used": "none",
+                    "guardrails_triggered": True
+                }
             }
 
     def display_response_metadata(self, response: dict[str, Any], response_time: float):
-        """Display response metadata"""
+        """Display enhanced response metadata and analytics"""
         metadata = response.get("metadata", {})
         
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.caption(f"⏱️ {response_time:.2f}s")
-        
-        with col2:
-            confidence = response.get("confidence", 0)
-            st.caption(f"🎯 {confidence:.0%}")
-        
-        with col3:
-            method = metadata.get("generation_method", "unknown")
-            st.caption(f"🤖 {method}")
-        
-        with col4:
-            docs = metadata.get("documents_found", 0)
-            st.caption(f"📚 {docs} docs")
+        with st.expander("📊 Response Analytics", expanded=False):
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Confidence", f"{response.get('confidence', 0):.0%}")
+                
+            with col2:
+                st.metric("Response Time", f"{response_time:.2f}s")
+                
+            with col3:
+                docs_found = metadata.get("documents_found", 0)
+                st.metric("Documents Used", docs_found)
+                
+            with col4:
+                retrieval_conf = metadata.get("retrieval_confidence", 0)
+                st.metric("Retrieval Score", f"{retrieval_conf:.0%}")
+            
+            # Enhanced metadata in second row
+            col5, col6, col7, col8 = st.columns(4)
+            
+            with col5:
+                method = metadata.get("generation_method", "unknown")
+                st.caption(f"**Method:** {method}")
+                
+            with col6:
+                model_used = metadata.get("model_used", "unknown")
+                st.caption(f"**Model:** {model_used}")
+                
+            with col7:
+                guardrails = metadata.get("guardrails_triggered", False)
+                status = "🛡️ Active" if guardrails else "✅ Clear"
+                st.caption(f"**Guardrails:** {status}")
+                
+            with col8:
+                timestamp = metadata.get("timestamp", "")
+                if timestamp:
+                    time_str = timestamp.split("T")[1][:8] if "T" in timestamp else "N/A"
+                    st.caption(f"**Time:** {time_str}")
+            
+            # Source documents if available
+            source_docs = response.get("source_documents", [])
+            if source_docs:
+                st.markdown("**📚 Source Documents:**")
+                for i, doc in enumerate(source_docs[:2], 1):
+                    similarity = doc.get("similarity", 0)
+                    question = doc.get("question", "")[:80]
+                    st.caption(f"{i}. {question}... (similarity: {similarity:.0%})")
+                    
+            # Performance insights
+            if response_time > 3.0:
+                st.warning("⚠️ Slow response detected. Consider using a faster model.")
+            elif response.get('confidence', 0) < 0.4:
+                st.info("💡 Low confidence response. Consider rephrasing your question.")
+            elif metadata.get("guardrails_triggered", False):
+                st.info("🛡️ Safety guardrails were triggered to ensure response quality.")
 
     def handle_feedback(self, message_index: int, sentiment: str, type: str):
         """Handle user feedback"""
@@ -623,8 +795,8 @@ class JupiterFAQApp:
         
         with col1:
             st.markdown("### 🎛️ Response Settings")
-            max_tokens = st.slider("Max Response Length", 50, 1000, 500, 50)
-            similarity_threshold = st.slider("Search Precision", 0.1, 0.9, 0.4, 0.05)
+            st.slider("Max Response Length", 50, 1000, 500, 50)
+            st.slider("Search Precision", 0.1, 0.9, 0.4, 0.05)
             
         with col2:
             st.markdown("### 🔍 Test Search")
