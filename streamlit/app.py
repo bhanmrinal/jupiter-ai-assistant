@@ -5,6 +5,7 @@ Advanced AI-powered customer support for Jupiter Money
 """
 
 import os
+import sys
 import time
 from datetime import datetime
 from typing import Any
@@ -13,6 +14,11 @@ import pandas as pd
 import plotly.express as px
 
 import streamlit as st
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 # Set page config first
 st.set_page_config(
@@ -27,7 +33,7 @@ st.set_page_config(
     }
 )
 
-# Import our modules after page config
+# Import our modules after page config and path setup
 try:
     from src.database.chroma_client import ChromaClient
     from src.database.data_models import CategoryEnum, SourceTypeEnum
@@ -36,6 +42,7 @@ try:
     from src.models.retriever import Retriever
 except ImportError as e:
     st.error(f"Failed to import modules: {e}")
+    st.error("Make sure you're running from the correct directory and all dependencies are installed.")
     st.stop()
 
 
