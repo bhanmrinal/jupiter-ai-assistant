@@ -1,0 +1,23 @@
+# Core dependencies
+torch>=2.0.0
+transformers>=4.30.0
+sentence-transformers>=2.2.0
+chromadb>=0.4.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+loguru>=0.7.0
+
+# LLM integration
+groq>=0.4.0
+
+# Streamlit UI Dependencies
+streamlit>=1.46.0
+plotly>=6.1.0
+streamlit-chat>=0.1.1
+pandas>=2.3.0
+
+# Additional utilities
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+python-dateutil>=2.8.0 

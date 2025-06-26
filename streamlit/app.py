@@ -6,14 +6,13 @@ Advanced AI-powered customer support for Jupiter Money
 
 import os
 import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Any
+from datetime import datetime
+from typing import Any
+
+import pandas as pd
+import plotly.express as px
 
 import streamlit as st
-import plotly.express as px
-import plotly.graph_objects as go
-import pandas as pd
-from streamlit_chat import message
 
 # Set page config first
 st.set_page_config(
@@ -31,10 +30,10 @@ st.set_page_config(
 # Import our modules after page config
 try:
     from src.database.chroma_client import ChromaClient
+    from src.database.data_models import CategoryEnum, SourceTypeEnum
     from src.models.llm_manager import LLMManager
     from src.models.response_generator import ResponseGenerator
     from src.models.retriever import Retriever
-    from src.database.data_models import CategoryEnum, SourceTypeEnum
 except ImportError as e:
     st.error(f"Failed to import modules: {e}")
     st.stop()
@@ -290,7 +289,7 @@ class JupiterFAQApp:
             # Show response metadata
             self.display_response_metadata(response, end_time - start_time)
 
-    def generate_response(self, query: str) -> Dict[str, Any]:
+    def generate_response(self, query: str) -> dict[str, Any]:
         """Generate response using the selected model configuration"""
         try:
             system = st.session_state.system_components
@@ -322,7 +321,7 @@ class JupiterFAQApp:
                 "metadata": {"error": str(e), "generation_method": "error"}
             }
 
-    def display_response_metadata(self, response: Dict[str, Any], response_time: float):
+    def display_response_metadata(self, response: dict[str, Any], response_time: float):
         """Display response metadata"""
         metadata = response.get("metadata", {})
         
@@ -354,7 +353,7 @@ class JupiterFAQApp:
         }
         
         st.session_state.user_feedback.append(feedback_data)
-        st.toast(f"✅ Thank you for your feedback!")
+        st.toast("✅ Thank you for your feedback!")
 
     def render_analytics_dashboard(self):
         """Render analytics dashboard"""
