@@ -153,6 +153,16 @@ class JupiterFAQApp:
         """Initialize the FAQ system with caching"""
         try:
             with st.spinner("🚀 Initializing Jupiter FAQ Bot..."):
+                # Set ChromaDB path for Streamlit deployment
+                import os
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                chromadb_path = os.path.join(current_dir, "data", "embeddings", "chroma_db")
+                
+                # Override settings for Streamlit
+                from config.settings import settings
+                original_path = settings.database.chromadb_path
+                settings.database.chromadb_path = chromadb_path
+                                
                 # Initialize components
                 chroma_client = ChromaClient()
                 llm_manager = LLMManager(enable_conversation=True)
@@ -197,10 +207,13 @@ class JupiterFAQApp:
                     system = st.session_state.system_components
                     model_info = system['llm_manager'].get_model_info()
                     
-                    # Model selection
+                    # Model selection - Handle both old and new structure
                     groq_models = model_info.get('groq_models', {})
-                    if groq_models:
-                        model_names = ["Auto (Smart Selection)"] + [data['name'] for data in groq_models.values()]
+                    if groq_models and len(groq_models) > 0:
+                        model_names = ["Auto (Smart Selection)"]
+                        for model_id, model_data in groq_models.items():
+                            if isinstance(model_data, dict) and model_data.get('loaded', False):
+                                model_names.append(model_data.get('name', model_id))
                         
                         selected_model = st.selectbox(
                             "Choose Model:", 
@@ -215,20 +228,25 @@ class JupiterFAQApp:
                         else:
                             # Find the model ID for the selected name
                             for model_id, model_data in groq_models.items():
-                                if model_data['name'] == selected_model:
+                                if isinstance(model_data, dict) and model_data.get('name') == selected_model:
                                     st.session_state.preferred_groq_model = model_id
                                     break
                     else:
                         st.selectbox("Choose Model:", ["Auto (Smart Selection)"], index=0, disabled=True)
                         st.session_state.preferred_groq_model = "auto"
+                        
+                    # Show model status
+                    st.caption(f"✅ {len(groq_models)} Groq models loaded")
                 else:
                     # Show basic selection while system initializes
                     st.selectbox("Choose Model:", ["Auto (Smart Selection)"], index=0, disabled=True)
                     st.session_state.preferred_groq_model = "auto"
-            except Exception:
+                    st.caption("🔄 Initializing models...")
+            except Exception as e:
                 # Fallback if there's any error
                 st.selectbox("Choose Model:", ["Auto (Smart Selection)"], index=0, disabled=True)
                 st.session_state.preferred_groq_model = "auto"
+                st.caption(f"⚠️ Model info error: {str(e)[:50]}...")
             
             # Show guardrails info
             with st.expander("🛡️ Safety Guardrails", expanded=False):
@@ -251,14 +269,19 @@ class JupiterFAQApp:
                         st.text("✅ Groq API Key configured")
                     else:
                         st.text("⚠️ Groq API Key missing")
+                        
+                    # Database status
+                    try:
+                        system = st.session_state.system_components
+                        stats = system['chroma_client'].get_collection_stats()
+                        doc_count = stats.get('total_documents', 0)
+                        st.text(f"✅ {doc_count} documents loaded")
+                    except:
+                        st.text("⚠️ Database status unknown")
                 else:
                     st.info("🔄 System ready")
             except Exception:
                 st.info("🔄 System ready")
-            
-            # Enhanced Data Info
-            st.markdown("### 📚 Knowledge Base")
-            st.info("1,044 Jupiter Money documents loaded")
             
             # Clear chat button
             st.divider()
@@ -402,25 +425,7 @@ class JupiterFAQApp:
                             metadata_info["response"]
                         )
                     
-                    # Add feedback buttons
-                    col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 4])
-                    
-                    with col1:
-                        if st.button("👍", key=f"thumb_up_{feedback_idx}"):
-                            self.handle_feedback(feedback_idx, "positive", "thumbs_up")
-                    
-                    with col2:
-                        if st.button("👎", key=f"thumb_down_{feedback_idx}"):
-                            self.handle_feedback(feedback_idx, "negative", "thumbs_down")
-                    
-                    with col3:
-                        if st.button("⭐", key=f"star_{feedback_idx}"):
-                            self.handle_feedback(feedback_idx, "excellent", "star")
-                    
-                    with col4:
-                        if st.button("📋", key=f"copy_{feedback_idx}"):
-                            st.code(assistant_msg["content"])
-                            st.toast("✅ Copied to clipboard format!")
+                    # Feedback section removed as per user request
             
             # Add a subtle separator between conversations
             if feedback_idx < len(st.session_state.messages) - 1:
@@ -604,64 +609,97 @@ class JupiterFAQApp:
             }
 
     def display_response_metadata(self, response: dict[str, Any], response_time: float):
-        """Display enhanced response metadata and analytics"""
+        """Display enhanced response metadata and analytics as inline info"""
         metadata = response.get("metadata", {})
         
-        with st.expander("📊 Response Analytics", expanded=False):
-            col1, col2, col3, col4 = st.columns(4)
+        # Create inline metrics display
+        col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
+        
+        with col1:
+            confidence = response.get('confidence', 0)
+            confidence_color = "green" if confidence > 0.8 else "orange" if confidence > 0.5 else "red"
+            st.markdown(f"**Confidence:** :{confidence_color}[{confidence:.0%}]")
+        
+        with col2:
+            time_color = "green" if response_time < 1.0 else "orange" if response_time < 3.0 else "red" 
+            st.markdown(f"**Time:** :{time_color}[{response_time:.1f}s]")
+        
+        with col3:
+            docs_found = metadata.get("documents_found", 0)
+            docs_color = "green" if docs_found > 2 else "orange" if docs_found > 0 else "red"
+            st.markdown(f"**Sources:** :{docs_color}[{docs_found} docs]")
+        
+        with col4:
+            model_used = metadata.get("model_used", "unknown")
+            # If it's already a friendly name (contains spaces), use as is
+            if " " in model_used:
+                model_short = model_used
+            else:
+                # Otherwise, clean up technical model names
+                model_short = model_used.replace("llama-", "").replace("-versatile", "").replace("-instant", "").replace("gemma2-", "gemma-")
+            st.markdown(f"**Model:** {model_short}")
             
-            with col1:
-                st.metric("Confidence", f"{response.get('confidence', 0):.0%}")
-            
-            with col2:
-                st.metric("Response Time", f"{response_time:.2f}s")
-            
-            with col3:
-                docs_found = metadata.get("documents_found", 0)
-                st.metric("Documents Used", docs_found)
-            
-            with col4:
-                retrieval_conf = metadata.get("retrieval_confidence", 0)
-                st.metric("Retrieval Score", f"{retrieval_conf:.0%}")
+        with col5:
+            # Analytics icon with detailed analytics in popover
+            if st.button("📊", key=f"analytics_{hash(str(metadata))}", help="View detailed analytics"):
+                st.session_state.show_detailed_analytics = True
+        
+        # Show detailed analytics if requested
+        if st.session_state.get('show_detailed_analytics', False):
+            with st.expander("📊 Detailed Analytics", expanded=True):
+                col1, col2, col3, col4 = st.columns(4)
                 
-            # Enhanced metadata in second row
-            col5, col6, col7, col8 = st.columns(4)
-            
-            with col5:
-                method = metadata.get("generation_method", "unknown")
-                st.caption(f"**Method:** {method}")
+                with col1:
+                    st.metric("Confidence", f"{confidence:.0%}")
+                    method = metadata.get("generation_method", "unknown")
+                    st.caption(f"**Method:** {method}")
                 
-            with col6:
-                model_used = metadata.get("model_used", "unknown")
-                st.caption(f"**Model:** {model_used}")
+                with col2:
+                    st.metric("Response Time", f"{response_time:.2f}s")
+                    retrieval_conf = metadata.get("retrieval_confidence", 0)
+                    st.metric("Retrieval Score", f"{retrieval_conf:.0%}")
                 
-            with col7:
-                guardrails = metadata.get("guardrails_triggered", False)
-                status = "🛡️ Active" if guardrails else "✅ Clear"
-                st.caption(f"**Guardrails:** {status}")
+                with col3:
+                    st.metric("Documents Used", docs_found)
+                    guardrails = metadata.get("guardrails_triggered", False)
+                    status = "🛡️ Active" if guardrails else "✅ Clear"
+                    st.caption(f"**Guardrails:** {status}")
                 
-            with col8:
-                timestamp = metadata.get("timestamp", "")
-                if timestamp:
-                    time_str = timestamp.split("T")[1][:8] if "T" in timestamp else "N/A"
-                    st.caption(f"**Time:** {time_str}")
-            
-            # Source documents if available
-            source_docs = response.get("source_documents", [])
-            if source_docs:
-                st.markdown("**📚 Source Documents:**")
-                for i, doc in enumerate(source_docs[:2], 1):
-                    similarity = doc.get("similarity", 0)
-                    question = doc.get("question", "")[:80]
-                    st.caption(f"{i}. {question}... (similarity: {similarity:.0%})")
+                with col4:
+                    timestamp = metadata.get("timestamp", "")
+                    if timestamp:
+                        time_str = timestamp.split("T")[1][:8] if "T" in timestamp else "N/A"
+                        st.caption(f"**Time:** {time_str}")
+                    st.caption(f"**Model:** {model_used}")
+                
+                # Source documents if available
+                source_docs = response.get("source_documents", [])
+                if source_docs:
+                    st.markdown("**📚 Source Documents:**")
+                    for i, doc in enumerate(source_docs[:3], 1):
+                        if isinstance(doc, dict):
+                            # Handle dict format from API response
+                            similarity = doc.get("similarity", doc.get("distance", 0))
+                            question = doc.get("question", "")[:80]
+                            st.caption(f"{i}. {question}... (score: {similarity:.0%})")
+                        else:
+                            # Handle object format from direct database query
+                            similarity = getattr(doc, 'similarity_score', 0)
+                            question = getattr(doc, 'question', '')[:80]
+                            st.caption(f"{i}. {question}... (score: {similarity:.0%})")
+                            
+                # Performance insights
+                if response_time > 3.0:
+                    st.warning("⚠️ Slow response detected. Consider using a faster model.")
+                elif confidence < 0.4:
+                    st.info("💡 Low confidence response. Consider rephrasing your question.")
+                elif metadata.get("guardrails_triggered", False):
+                    st.info("🛡️ Safety guardrails were triggered to ensure response quality.")
                     
-            # Performance insights
-            if response_time > 3.0:
-                st.warning("⚠️ Slow response detected. Consider using a faster model.")
-            elif response.get('confidence', 0) < 0.4:
-                st.info("💡 Low confidence response. Consider rephrasing your question.")
-            elif metadata.get("guardrails_triggered", False):
-                st.info("🛡️ Safety guardrails were triggered to ensure response quality.")
+                # Close button
+                if st.button("❌ Close", key="close_analytics"):
+                    st.session_state.show_detailed_analytics = False
+                    st.rerun()
 
     def display_related_suggestions(self, query: str, response: dict):
         """Display AI-generated related query suggestions"""
@@ -1131,13 +1169,15 @@ class JupiterFAQApp:
             try:
                 model_info = system['llm_manager'].get_model_info()
                 model_count = sum(1 for model in model_info['models'].values() if model['loaded'])
-                st.metric("🤖 Models", f"{model_count}/2")
-                if model_count >= 1:
+                groq_count = len([m for m in model_info['models'].values() if m['loaded'] and m['type'] == 'groq'])
+                st.metric("🤖 Models", f"{model_count} loaded")
+                if groq_count >= 1:
                     st.success("✅ Models Ready")
                 else:
-                    st.error("❌ Models Error")
-            except:
+                    st.warning("⚠️ Limited Models")
+            except Exception as e:
                 st.error("❌ Models Error")
+                st.caption(f"Error: {str(e)}")
         
         st.divider()
         
@@ -1152,18 +1192,19 @@ class JupiterFAQApp:
             st.slider("Search Precision", 0.1, 0.9, 0.4, 0.05)
             
         with col2:
-            st.markdown("### 🔍 Test Search")
-            test_query = st.text_input("Test query:", placeholder="e.g., How to reset PIN?")
-            
-            if st.button("🔍 Test") and test_query:
+            st.markdown("### 🔧 System Info")
+            if st.session_state.system_initialized:
                 try:
-                    with st.spinner("Searching..."):
-                        results = system['retriever'].search(test_query, top_k=2)
-                    st.success(f"✅ Found {len(results)} relevant documents")
-                    for i, doc in enumerate(results[:2]):
-                        st.text(f"{i+1}. {doc.question[:80]}... (Score: {doc.similarity_score:.2f})")
-                except Exception as e:
-                    st.error(f"❌ Search failed: {str(e)}")
+                    response_gen = system['response_generator']
+                    health_status = response_gen.health_check()
+                    if health_status:
+                        st.success("✅ System Healthy")
+                    else:
+                        st.warning("⚠️ System Issues Detected")
+                except Exception:
+                    st.error("❌ Health Check Failed")
+            else:
+                st.info("🔄 System Not Initialized")
         
         st.divider()
         

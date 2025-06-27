@@ -10,6 +10,7 @@ from typing import Any
 
 from transformers import pipeline
 
+from config.settings import settings
 from src.database.data_models import QueryResult
 from src.models.llm_manager import LLMManager
 from src.models.prompt_templates import PromptTemplates
@@ -63,10 +64,15 @@ class ResponseGenerator:
         try:
             # Step 1: Retrieve relevant documents
             log.info(f"Processing query: {query[:100]}...")
-            retrieval_result = self.retriever.search(query, top_k=5, similarity_threshold=0.4)
+            
+            # Use configurable threshold from settings
+            similarity_threshold = settings.model.similarity_threshold
+            retrieval_result = self.retriever.search(query, top_k=5, similarity_threshold=similarity_threshold)
 
             # Step 2: Generate response based on retrieval quality
-            if retrieval_result.confidence >= 0.4 and retrieval_result.matched_documents:
+            # Lower the confidence requirement to match the new threshold
+            min_confidence = max(0.2, similarity_threshold)  # Minimum 0.2 or threshold value
+            if retrieval_result.confidence >= min_confidence and retrieval_result.matched_documents:
                 response = self._generate_contextual_response(
                     query, retrieval_result, max_tokens, preferred_model
                 )
@@ -97,10 +103,10 @@ class ResponseGenerator:
                     "response_time_seconds": round(response_time, 3),
                     "retrieval_confidence": retrieval_result.confidence,
                     "documents_found": retrieval_result.total_matches,
-                    "generation_method": response.get("method", "unknown"),
-                    "model_used": response.get("model_used", "unknown"),
+                    "generation_method": response.get("metadata", {}).get("generation_method", "unknown"),
+                    "model_used": response.get("metadata", {}).get("model_used", "Unknown"),
                     "timestamp": start_time.isoformat(),
-                    "guardrails_triggered": response.get("guardrails_triggered", False),
+                    "guardrails_triggered": response.get("metadata", {}).get("guardrails_triggered", False),
                 },
             }
 
@@ -150,7 +156,8 @@ class ResponseGenerator:
             # Try enhanced Groq LLM first
             if self.llm_manager.conversation_loaded:
                 try:
-                    best_model = self.llm_manager.get_best_groq_model(len(query), "complex")
+                    # Use preferred model if specified, otherwise get best model
+                    best_model = preferred_model or self.llm_manager.get_best_groq_model(len(query), "complex")
                     
                     if best_model:
                         log.info(f"Using Groq model: {best_model}")
@@ -158,9 +165,11 @@ class ResponseGenerator:
                             system_prompt=formatted_prompt,
                             user_query=f"Answer this query in {detected_language}: {query}",
                             max_tokens=max_tokens,
-                            model_preference=preferred_model
+                            model_preference=best_model
                         )
-                        model_used = best_model
+                        # Get the friendly name for display
+                        model_info = self.llm_manager.GROQ_MODELS.get(best_model, {})
+                        model_used = model_info.get("name", best_model)
                         
                         if answer:
                             # Verify language consistency
@@ -187,7 +196,7 @@ class ResponseGenerator:
                     if self.qa_pipeline:
                         pipeline_result = self.qa_pipeline(question=query, context=context)
                         raw_answer = pipeline_result.get("answer", "")
-                        model_used = "distilbert-qa"
+                        model_used = "DistilBERT QA"
                         
                         # Use LLM to enhance and ensure language consistency for transformer response
                         if raw_answer and self.llm_manager.conversation_loaded:
@@ -211,7 +220,7 @@ User's original question: {query}"""
                             
                             if enhanced_answer:
                                 answer = enhanced_answer
-                                model_used = "enhanced_distilbert"
+                                model_used = "Enhanced DistilBERT"
                             else:
                                 answer = raw_answer  # Use raw if enhancement fails
                     else:
@@ -246,7 +255,7 @@ CRITICAL: Respond STRICTLY in {detected_language}. Be warm, helpful, and profess
                             )
                             if fallback_answer:
                                 answer = fallback_answer
-                                model_used = "llm_fallback"
+                                model_used = "LLM Fallback"
                     
                     # If LLM fails, use the no-context template which is dynamic
                     if not answer:
@@ -264,7 +273,7 @@ CRITICAL: Respond STRICTLY in {detected_language}. Be warm, helpful, and profess
                                 max_tokens=200
                             )
                             if answer:
-                                model_used = "template_fallback"
+                                model_used = "Template Fallback"
                 
                 except Exception as e:
                     log.error(f"LLM fallback generation failed: {e}")
@@ -272,7 +281,7 @@ CRITICAL: Respond STRICTLY in {detected_language}. Be warm, helpful, and profess
                 # Only if everything fails, indicate system error
                 if not answer:
                     answer = "System temporarily unavailable. Please try again."
-                    model_used = "system_error"
+                    model_used = "System Error"
 
             # Calculate response time
             response_time = (datetime.now() - start_time).total_seconds()
@@ -331,16 +340,18 @@ CRITICAL: Respond STRICTLY in {detected_language}. Be warm, helpful, and profess
             # Try Groq with no-context template
             if self.llm_manager.conversation_loaded:
                 try:
-                    best_model = self.llm_manager.get_best_groq_model(len(query), "simple")
+                    best_model = preferred_model or self.llm_manager.get_best_groq_model(len(query), "simple")
                     
                     if best_model:
                         answer, _ = self.llm_manager.generate_conversation(
                             system_prompt=no_context_prompt,
                             user_query=f"Answer this query in {detected_language}: {query}",
                             max_tokens=max_tokens,
-                            model_preference=preferred_model or best_model
+                            model_preference=best_model
                         )
-                        model_used = best_model
+                        # Get the friendly name for display
+                        model_info = self.llm_manager.GROQ_MODELS.get(best_model, {})
+                        model_used = model_info.get("name", best_model)
 
                         if answer:
                             # Verify language consistency
@@ -384,7 +395,9 @@ CRITICAL: Respond STRICTLY in {detected_language}. Be helpful, warm, and profess
                             )
                             if llm_answer:
                                 answer = llm_answer
-                                model_used = "llm_general_guidance"
+                                # Get the friendly name for display
+                                model_info = self.llm_manager.GROQ_MODELS.get(best_model, {})
+                                model_used = model_info.get("name", best_model)
                     
                     # If that fails, try HuggingFace models
                     if not answer:
@@ -406,13 +419,13 @@ Make it sound like a caring Jupiter team member while maintaining helpfulness.""
                                 )
                                 if enhanced_response:
                                     answer = enhanced_response
-                                    model_used = "enhanced_hf"
+                                    model_used = "Enhanced HF"
                                 else:
                                     answer = fallback_answer
-                                    model_used = "hf_raw"
+                                    model_used = "HuggingFace Raw"
                             else:
                                 answer = fallback_answer
-                                model_used = "hf_fallback"
+                                model_used = "HuggingFace Fallback"
                                 
                 except Exception as e:
                     log.error(f"HuggingFace fallback failed: {e}")
@@ -437,7 +450,7 @@ Be understanding, professional, and maintain Jupiter team identity even during t
                         )
                         if error_response:
                             answer = error_response
-                            model_used = "llm_error_response"
+                            model_used = "LLM Error Response"
                 
                 except Exception as e:
                     log.error(f"LLM error response generation failed: {e}")
@@ -445,7 +458,7 @@ Be understanding, professional, and maintain Jupiter team identity even during t
                 # Only absolute last resort - minimal system message
                 if not answer:
                     answer = "System temporarily unavailable. Please try again."
-                    model_used = "system_minimal"
+                    model_used = "System Minimal"
 
             # Calculate response time
             response_time = (datetime.now() - start_time).total_seconds()
@@ -501,7 +514,10 @@ Be understanding, professional, and maintain Jupiter team identity even during t
             "karo", "kare", "kar", "ho", "haan", "nahi", "nahin", "toh", "phir",
             "abhi", "waha", "yaha", "kahan", "kab", "kyun", "kyunki", "lekin",
             "par", "ke", "me", "main", "hun", "hu", "hoon", "batao", "bataye",
-            "chahiye", "chaahiye", "zarurat", "paisa", "paise", "rupaye", "rupee"
+            "chahiye", "chaahiye", "zarurat", "paisa", "paise", "rupaye", "rupee",
+            "mereko", "mujhe", "muje", "padegi", "padega", "hogi", "hoga", "liye",
+            "uske", "iske", "waise", "aise", "dekho", "dekh", "suno", "sun",
+            "bhi", "bhe", "bhaiya", "didi", "ji", "sahab", "madam", "sir"
         ]
         
         # Convert text to lowercase for checking
@@ -518,7 +534,7 @@ Be understanding, professional, and maintain Jupiter team identity even during t
             return "hinglish"
         
         # Single Hinglish word might still be Hinglish if it's a key indicator
-        key_hinglish_indicators = ["kya", "kaise", "karo", "batao", "chahiye"]
+        key_hinglish_indicators = ["kya", "kaise", "karo", "batao", "chahiye", "mereko", "padegi", "liye", "uske"]
         if any(word in words for word in key_hinglish_indicators):
             return "hinglish"
             

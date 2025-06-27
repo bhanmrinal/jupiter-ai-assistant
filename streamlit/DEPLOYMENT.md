@@ -25,7 +25,7 @@ In the Streamlit Cloud dashboard:
 2. **Add** the following:
 
 ```toml
-GROQ_API_KEY = "your_groq_api_key_here"
+GROQ_API_KEY = "sk_Sl5kN1QYCsiTepFM0kTfWGdyb3FY3GAqLdbnwhLzwZS9WIqX8jHQ"
 TOKENIZERS_PARALLELISM = "false"
 ```
 

@@ -328,6 +328,7 @@ class LLMManager:
                 "speed": model_data.get("speed", "~1s"),
                 "context": model_data.get("context", "Unknown"),
                 "best_for": model_data.get("best_for", "General use"),
+                "type": "groq",
                 "local": False,
             }
 
@@ -350,7 +351,13 @@ class LLMManager:
                         "local": True,
                     }
 
+        # Combine all models into a single 'models' key for compatibility
+        all_models = {}
+        all_models.update(groq_models_info)
+        all_models.update(hf_models_info)
+
         return {
+            "models": all_models,
             "groq_models": groq_models_info,
             "hf_models": hf_models_info,
             "device": self.device,
