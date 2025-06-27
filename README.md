@@ -15,16 +15,10 @@ A production-ready, multilingual AI-powered FAQ bot for Jupiter Money that deliv
 - **Cultural Sensitivity**: Native support for English, Hindi, and Hinglish
 
 ### 📊 **Production-Grade Architecture**
-- **185 Jupiter Documents**: Help Center, Community, Blog, and FAQ coverage
+- **1K+ Jupiter Documents**: Help Center, Community, Blog, and FAQ coverage
 - **Semantic Search**: Advanced ChromaDB vector embeddings
 - **Real-time Analytics**: Performance monitoring and usage insights
 - **Error Handling**: Robust retry logic with exponential backoff
-
-### 🎨 ** Streamlit UI**
-- **Interactive Chat Interface**: Real-time conversations with message history
-- **Analytics Dashboard**: Performance metrics with interactive Plotly charts
-- **Admin Panel**: System health monitoring and data management
-- **Responsive Design**: Mobile-friendly with Jupiter brand styling
 
 ### ⚡ **Performance Metrics**
 - **Response Time**: 0.6-1.4 seconds average (1350x faster than original)
@@ -145,15 +139,6 @@ MODELS = {
 
 ## 📊 Data Sources & Coverage
 
-### **185 Jupiter Documents** across 4 sources:
-
-| Source | Documents | Coverage |
-|--------|-----------|----------|
-| **Help Center** | 89 docs | Official banking guides, policies |
-| **Community** | 52 docs | User discussions, Q&A |
-| **Blog** | 31 docs | Product updates, financial articles |
-| **FAQ** | 13 docs | Direct question-answer pairs |
-
 ### **Categories Covered:**
 - 💳 **Banking & Cards**: Account management, card features
 - 💸 **Payments & UPI**: Transaction troubleshooting, setup guides
@@ -233,13 +218,6 @@ python test_setup.py
 - Query pattern analysis
 - System health indicators
 
-## 🔐 Security & Compliance
-
-- **API Key Management**: Secure environment variable handling
-- **Data Privacy**: No user data persistence without consent
-- **Rate Limiting**: Built-in protection against abuse
-- **Input Validation**: Comprehensive security checks
-- **Error Handling**: Graceful degradation without data exposure
 
 ## 🌐 Deployment Options
 
@@ -289,15 +267,6 @@ export TOKENIZERS_PARALLELISM=false
 - **Network**: Enable connection pooling for API calls
 - **Storage**: Use SSD for ChromaDB persistence
 
-## 🤝 Contributing
-
-1. **Fork** the repository
-2. **Create** feature branch (`git checkout -b feature/enhancement`)
-3. **Commit** changes (`git commit -am 'Add enhancement'`)
-4. **Push** to branch (`git push origin feature/enhancement`)
-5. **Create** Pull Request
-
-
 ## 🙏 Acknowledgments
 
 - **Jupiter Money** for the comprehensive FAQ content
@@ -307,16 +276,7 @@ export TOKENIZERS_PARALLELISM=false
 - **Hugging Face** for the transformer models
 
 ---
-
-## 📊 Current Status
-
-✅ **Production Ready**: Fully deployed and tested  
-✅ **185 Documents**: Complete Jupiter knowledge base  
-✅ **Multi-language**: English, Hindi, Hinglish support  
-✅ **Sub-second Response**: Average 0.8s response time  
-✅ **99.9% Uptime**: Robust fallback systems  
-✅ **Beautiful UI**: Production-grade Streamlit app  
-✅ **Real-time Analytics**: Comprehensive monitoring  
+  
 
 **🚀 Live Demo**: [Jupiter FAQ Bot](https://jupiter-faq-bot.streamlit.app)
 
