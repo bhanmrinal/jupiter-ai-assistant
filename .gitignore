@@ -172,7 +172,6 @@ logs/
 
 # Model files and caches
 *.pkl
-*.pickle
 *.joblib
 *.h5
 *.hdf5
@@ -180,15 +179,21 @@ logs/
 *.pth
 *.onnx
 
+# Allow ChromaDB pickle files specifically
+!data/embeddings/chroma_db/**/*.pickle
+
 # Temporary files
 tmp/
 temp/
 .tmp/
 .temp/
-*.bin
-*.sqlite3
+
+# Database files (except ChromaDB)
 *.db
 *.sqlite
+# Allow ChromaDB files specifically
+!data/embeddings/chroma_db/*.sqlite3
+!data/embeddings/chroma_db/**/*.bin
 
 # Jupyter notebooks checkpoints
 .ipynb_checkpoints/
