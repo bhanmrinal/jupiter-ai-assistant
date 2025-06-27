@@ -322,7 +322,7 @@ class JupiterFAQApp:
                 else:
                     st.error("❌ Failed to initialize system")
                     return
-        
+
         st.markdown("# 🤖 Jupiter Money AI Assistant")
         st.markdown("*Your AI Help-Desk for Jupiter Money*")
         
@@ -343,13 +343,15 @@ class JupiterFAQApp:
                 
                 col1, col2 = st.columns([1, 4])
                 with col1:
-                    if st.form_submit_button("📤 Send", type="primary", use_container_width=True):
-                        if edited_prompt.strip():
-                            self.handle_user_input(edited_prompt.strip())
-                            st.rerun()
+                    send_clicked = st.form_submit_button("📤 Send", type="primary", use_container_width=True)
                 with col2:
-                    if st.form_submit_button("❌ Cancel", use_container_width=True):
-                        st.rerun()
+                    cancel_clicked = st.form_submit_button("❌ Cancel", use_container_width=True)
+                
+                # Handle form submission
+                if send_clicked and edited_prompt.strip():
+                    self.handle_user_input(edited_prompt.strip())
+                elif cancel_clicked:
+                    st.rerun()
         else:
             # Regular chat input
             if prompt := st.chat_input("Ask me anything about Jupiter Money..."):
@@ -610,18 +612,18 @@ class JupiterFAQApp:
             
             with col1:
                 st.metric("Confidence", f"{response.get('confidence', 0):.0%}")
-                
+            
             with col2:
                 st.metric("Response Time", f"{response_time:.2f}s")
-                
+            
             with col3:
                 docs_found = metadata.get("documents_found", 0)
                 st.metric("Documents Used", docs_found)
-                
+            
             with col4:
                 retrieval_conf = metadata.get("retrieval_confidence", 0)
                 st.metric("Retrieval Score", f"{retrieval_conf:.0%}")
-            
+                
             # Enhanced metadata in second row
             col5, col6, col7, col8 = st.columns(4)
             
@@ -689,7 +691,6 @@ class JupiterFAQApp:
                         if st.button(suggestion, key=suggestion_key, use_container_width=True):
                             # User clicked a suggestion - set it as the next query to process
                             st.session_state.suggestion_clicked = suggestion
-                            st.rerun()
                 
                 # Show additional suggestions if more than 3
                 if len(suggestions) > 3:
@@ -699,7 +700,6 @@ class JupiterFAQApp:
                             if st.button(suggestion, key=suggestion_key, use_container_width=True):
                                 # User clicked a suggestion - set it as the next query to process
                                 st.session_state.suggestion_clicked = suggestion
-                                st.rerun()
                                 
         except Exception:
             # Show fallback suggestions
@@ -715,7 +715,6 @@ class JupiterFAQApp:
                 if st.button(suggestion, key=fallback_key, use_container_width=True):
                     # User clicked a suggestion - set it as the next query to process
                     st.session_state.suggestion_clicked = suggestion
-                    st.rerun()
 
     def handle_feedback(self, message_index: int, sentiment: str, type: str):
         """Handle user feedback"""
