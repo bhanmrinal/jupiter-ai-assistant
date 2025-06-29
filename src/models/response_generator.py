@@ -67,6 +67,7 @@ class ResponseGenerator:
             
             # Use configurable threshold from settings
             similarity_threshold = settings.model.similarity_threshold
+            log.info(f"🔍 Using similarity_threshold: {similarity_threshold} (from settings.model.similarity_threshold)")
             retrieval_result = self.retriever.search(query, top_k=5, similarity_threshold=similarity_threshold)
 
             # Step 2: Generate response based on retrieval quality

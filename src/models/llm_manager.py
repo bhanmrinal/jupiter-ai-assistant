@@ -59,29 +59,41 @@ class LLMManager:
         }
     }
 
-    def __init__(self, enable_conversation: bool = True, preferred_model: str = "auto"):
-        """
-        Initialize LLM Manager with multiple models
-
-        Args:
-            enable_conversation: Whether to enable Groq conversation models
-            preferred_model: Preferred Groq model or "auto" for automatic selection
-        """
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+    def __init__(self, enable_conversation: bool = True, device: str = "auto"):
+        """Initialize LLM Manager with multiple model backends"""
+        self.device = self._determine_device(device)
         self.enable_conversation = enable_conversation
-        self.preferred_model = preferred_model
-
-        # Groq client and models
-        self.groq_client = None
+        
+        # Model state tracking
+        self.qa_models_loaded = False
         self.groq_loaded = False
-        self.available_groq_models = []
-
-        # HuggingFace models
+        
+        # Model containers
         self.hf_models = {}
         self.hf_models_loaded = {}
+        self.groq_client = None
+        self.available_groq_models = []
+        self.preferred_model = "auto"
 
         log.info(f"Initializing Enhanced LLMManager on {self.device}")
+
+        # Initialize models
         self._initialize_models()
+
+    def _determine_device(self, device: str) -> str:
+        """Determine the best device to use for models"""
+        if device == "auto":
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    return "cuda"
+                elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                    return "mps"
+                else:
+                    return "cpu"
+            except ImportError:
+                return "cpu"
+        return device
 
     def _initialize_models(self):
         """Initialize all available models"""
@@ -272,6 +284,7 @@ class LLMManager:
                 if response.choices and response.choices[0].message:
                     content = response.choices[0].message.content.strip()
                     confidence = 0.95  # Groq models are generally high quality
+                    
                     log.info(f"Response generated using {self.GROQ_MODELS[selected_model]['name']}")
                     return content, confidence
 

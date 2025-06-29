@@ -29,10 +29,15 @@ class ChromaClient:
     def _initialize_client(self):
         """Initialize ChromaDB client"""
         try:
-            # Create persistent client
+            # Create persistent client with telemetry completely disabled
             self.client = chromadb.PersistentClient(
                 path=settings.database.chromadb_path,
-                settings=Settings(anonymized_telemetry=False, allow_reset=True),
+                settings=Settings(
+                    anonymized_telemetry=False, 
+                    allow_reset=True,
+                    chroma_client_auth_provider=None,
+                    chroma_client_auth_credentials=None
+                ),
             )
 
             # Get or create collection

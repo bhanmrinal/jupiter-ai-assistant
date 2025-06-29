@@ -30,7 +30,7 @@ class ModelConfig(BaseSettings):
     )
     llm_model: str = Field(default="llama-3.3-70b-versatile", env="LLM_MODEL")
     max_context_length: int = Field(default=2048, env="MAX_CONTEXT_LENGTH")
-    similarity_threshold: float = Field(default=0.4, env="SIMILARITY_THRESHOLD")
+    similarity_threshold: float = Field(default=0.3, env="SIMILARITY_THRESHOLD")
     top_k_results: int = Field(default=5, env="TOP_K_RESULTS")
     confidence_threshold: float = Field(default=0.8, env="CONFIDENCE_THRESHOLD")
 
